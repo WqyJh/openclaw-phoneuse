@@ -409,58 +409,121 @@ class CommandHandler {
                 successResult("inputKey", ok, "Key event $keyCode sent")
             }
 
-            // ========== File Transfer ==========
+            // ========== File Operations (General Purpose) ==========
 
             "file.read" -> {
-                val fileId = params.optString("id", "")
+                val path = params.optString("path", params.optString("id", ""))
                 val offset = params.optLong("offset", 0)
-                val size = params.optInt("size", 2 * 1024 * 1024) // Default 2MB chunks
-                if (fileId.isEmpty()) return errorResult("Missing file id")
+                val size = params.optInt("size", 2 * 1024 * 1024) // 2MB chunks
+                if (path.isEmpty()) return errorResult("Missing path")
 
                 try {
-                    val file = java.io.File(fileId)
-                    if (!file.exists()) return errorResult("File not found: $fileId")
+                    val file = java.io.File(path)
+                    if (!file.exists()) return errorResult("File not found: $path")
+                    if (!file.canRead()) return errorResult("Permission denied: $path")
                     val total = file.length()
                     val actualOffset = offset.coerceIn(0, total)
-                    val actualSize = size.toLong().coerceIn(0, total - actualOffset).toInt()
-                    val buffer = ByteArray(actualSize)
+                    val remaining = (total - actualOffset).toInt().coerceAtMost(size)
+                    val buffer = ByteArray(remaining)
                     java.io.RandomAccessFile(file, "r").use { raf ->
                         raf.seek(actualOffset)
                         raf.readFully(buffer)
                     }
-                    val base64 = android.util.Base64.encodeToString(buffer, android.util.Base64.NO_WRAP)
                     JSONObject()
                         .put("ok", true)
-                        .put("base64", base64)
+                        .put("base64", android.util.Base64.encodeToString(buffer, android.util.Base64.NO_WRAP))
+                        .put("path", path)
                         .put("offset", actualOffset)
-                        .put("size", actualSize)
+                        .put("size", remaining)
                         .put("total", total)
-                        .put("done", actualOffset + actualSize >= total)
+                        .put("done", actualOffset + remaining >= total)
                 } catch (e: Exception) {
                     errorResult("file.read failed: ${e.message}")
                 }
             }
 
-            "file.list" -> {
-                val dir = java.io.File(svc.applicationContext.cacheDir, "recordings")
-                val files = dir.listFiles()?.map { f ->
+            "file.write" -> {
+                val path = params.optString("path", "")
+                val base64 = params.optString("base64", "")
+                val append = params.optBoolean("append", false)
+                if (path.isEmpty()) return errorResult("Missing path")
+                if (base64.isEmpty()) return errorResult("Missing base64 data")
+
+                try {
+                    val file = java.io.File(path)
+                    file.parentFile?.mkdirs()
+                    val data = android.util.Base64.decode(base64, android.util.Base64.NO_WRAP)
+                    if (append) {
+                        file.appendBytes(data)
+                    } else {
+                        file.writeBytes(data)
+                    }
                     JSONObject()
-                        .put("id", f.absolutePath)
-                        .put("name", f.name)
-                        .put("size", f.length())
-                        .put("modified", f.lastModified())
-                } ?: emptyList()
-                JSONObject()
-                    .put("ok", true)
-                    .put("files", org.json.JSONArray(files))
+                        .put("ok", true)
+                        .put("path", path)
+                        .put("size", file.length())
+                        .put("written", data.size)
+                } catch (e: Exception) {
+                    errorResult("file.write failed: ${e.message}")
+                }
+            }
+
+            "file.info" -> {
+                val path = params.optString("path", "")
+                if (path.isEmpty()) return errorResult("Missing path")
+                try {
+                    val file = java.io.File(path)
+                    if (!file.exists()) return errorResult("Not found: $path")
+                    JSONObject()
+                        .put("ok", true)
+                        .put("path", file.absolutePath)
+                        .put("name", file.name)
+                        .put("size", file.length())
+                        .put("isDirectory", file.isDirectory)
+                        .put("isFile", file.isFile)
+                        .put("canRead", file.canRead())
+                        .put("canWrite", file.canWrite())
+                        .put("lastModified", file.lastModified())
+                } catch (e: Exception) {
+                    errorResult("file.info failed: ${e.message}")
+                }
+            }
+
+            "file.list" -> {
+                val path = params.optString("path", 
+                    params.optString("dir", "/sdcard"))
+                try {
+                    val dir = java.io.File(path)
+                    if (!dir.exists()) return errorResult("Not found: $path")
+                    if (!dir.isDirectory) return errorResult("Not a directory: $path")
+                    val entries = dir.listFiles()?.sortedWith(
+                        compareByDescending<java.io.File> { it.isDirectory }.thenBy { it.name }
+                    )?.map { f ->
+                        JSONObject()
+                            .put("name", f.name)
+                            .put("path", f.absolutePath)
+                            .put("size", if (f.isFile) f.length() else 0)
+                            .put("isDirectory", f.isDirectory)
+                            .put("lastModified", f.lastModified())
+                    } ?: emptyList()
+                    JSONObject()
+                        .put("ok", true)
+                        .put("path", dir.absolutePath)
+                        .put("count", entries.size)
+                        .put("entries", org.json.JSONArray(entries))
+                } catch (e: java.lang.SecurityException) {
+                    errorResult("Permission denied: $path. Grant 'All files access' in app settings.")
+                } catch (e: Exception) {
+                    errorResult("file.list failed: ${e.message}")
+                }
             }
 
             "file.delete" -> {
-                val fileId = params.optString("id", "")
-                if (fileId.isEmpty()) return errorResult("Missing file id")
-                val file = java.io.File(fileId)
+                val path = params.optString("path", params.optString("id", ""))
+                if (path.isEmpty()) return errorResult("Missing path")
+                val file = java.io.File(path)
                 val deleted = file.exists() && file.delete()
-                successResult("file.delete", deleted, if (deleted) "Deleted" else "Not found")
+                successResult("file.delete", deleted, if (deleted) "Deleted: $path" else "Not found: $path")
             }
 
             // ========== Screen Lock ==========

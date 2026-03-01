@@ -109,7 +109,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Version display
-        binding.versionText.text = "v23 • ${Build.MODEL}"
+        binding.versionText.text = "v24 • ${Build.MODEL}"
 
         // Device ID display
         try {
@@ -157,7 +157,7 @@ class MainActivity : AppCompatActivity() {
             sb.appendLine("===== OpenClaw PhoneUse Business Log =====")
             sb.appendLine("Time: ${dateFormat.format(java.util.Date())}")
             sb.appendLine("Device: ${Build.MODEL} (${Build.MANUFACTURER})")
-            sb.appendLine("Version: 2.0.0-v23")
+            sb.appendLine("Version: 2.0.0-v24")
             sb.appendLine("Accessibility: ${PhoneUseService.instance != null}")
             sb.appendLine("Gateway: ${GatewayForegroundService.gatewayClient != null}")
             sb.appendLine()
@@ -174,7 +174,7 @@ class MainActivity : AppCompatActivity() {
                 sb.appendLine("Time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}")
                 sb.appendLine("Device: ${Build.MODEL} (${Build.MANUFACTURER})")
                 sb.appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-                sb.appendLine("Version: 2.0.0-v23")
+                sb.appendLine("Version: 2.0.0-v24")
                 sb.appendLine()
                 sb.appendLine("=== State ===")
                 sb.appendLine("Accessibility: ${PhoneUseService.instance != null}")
@@ -216,6 +216,9 @@ class MainActivity : AppCompatActivity() {
 
         // Request battery optimization exemption (critical for background WebSocket)
         requestBatteryOptimizationExemption()
+
+        // Request all files access (for file.read/write on /sdcard)
+        requestStoragePermission()
 
         // Auto-connect if we have a saved URL and accessibility is enabled
         autoConnectIfReady()
@@ -259,6 +262,35 @@ class MainActivity : AppCompatActivity() {
      * Request exemption from battery optimization (Doze mode).
      * This is critical for keeping WebSocket alive during deep sleep.
      */
+    private fun requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!android.os.Environment.isExternalStorageManager()) {
+                try {
+                    val intent = android.content.Intent(
+                        android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        android.net.Uri.parse("package:$packageName")
+                    )
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    // Fallback for devices that don't support per-app settings
+                    try {
+                        startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                    } catch (_: Exception) {
+                        appendLog("Storage permission request failed")
+                    }
+                }
+            }
+        } else {
+            // Pre-Android 11: request legacy permissions
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this,
+                    arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                    9004)
+            }
+        }
+    }
+
     private fun requestBatteryOptimizationExemption() {
         val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
         if (!pm.isIgnoringBatteryOptimizations(packageName)) {

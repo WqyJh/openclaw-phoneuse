@@ -472,6 +472,72 @@ class PhoneUseService : AccessibilityService() {
         }
     }
 
+    // ========== Unlock ==========
+
+    /**
+     * Dismiss the lock screen. Works directly for swipe/none locks.
+     * For PIN/password, brings up the input screen.
+     * Requires API 28+ (Android 9).
+     */
+    fun dismissLockScreen(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            // GLOBAL_ACTION_DISMISS_LOCK_SCREEN = 8, added in API 28
+            performGlobalAction(8)
+        } else {
+            Log.w(TAG, "dismissLockScreen requires API 28+")
+            false
+        }
+    }
+
+    /**
+     * Unlock with PIN by dismissing keyguard then tapping digits.
+     * @return true if all steps completed
+     */
+    suspend fun unlockWithPin(pin: String): Boolean {
+        // Step 1: Dismiss lock screen (shows PIN input for secured locks)
+        dismissLockScreen()
+        kotlinx.coroutines.delay(500)
+
+        // Check if we're already unlocked (swipe/none lock)
+        val root1 = rootInActiveWindow
+        val pkg1 = root1?.packageName?.toString() ?: ""
+        root1?.recycle()
+        if (pkg1 != "com.android.systemui") {
+            Log.i(TAG, "Already unlocked (no PIN needed)")
+            return true
+        }
+
+        // Step 2: Try to find and tap PIN digits
+        for (digit in pin) {
+            val digitStr = digit.toString()
+            // Try finding the digit button by text
+            val found = findAndClick(digitStr, 1500)
+            if (!found) {
+                Log.w(TAG, "Could not find digit button: $digitStr")
+                return false
+            }
+            kotlinx.coroutines.delay(100)
+        }
+
+        // Step 3: Try pressing Enter/OK to confirm
+        kotlinx.coroutines.delay(200)
+        // Many PIN screens auto-confirm after all digits, but try Enter anyway
+        val enterFound = findAndClick("OK", 500) ||
+            findAndClick("确认", 500) ||
+            findAndClick("Enter", 500)
+        // Some PINs (4-6 digit) auto-unlock, so not finding Enter is OK
+
+        kotlinx.coroutines.delay(500)
+
+        // Verify unlock
+        val root2 = rootInActiveWindow
+        val pkg2 = root2?.packageName?.toString() ?: ""
+        root2?.recycle()
+        val unlocked = pkg2 != "com.android.systemui"
+        Log.i(TAG, "Unlock result: $unlocked (foreground: $pkg2)")
+        return unlocked
+    }
+
     // ========== Scroll ==========
 
     fun scrollDown(): Boolean {

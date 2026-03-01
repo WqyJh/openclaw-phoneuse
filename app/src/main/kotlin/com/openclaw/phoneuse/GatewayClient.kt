@@ -66,7 +66,9 @@ class GatewayClient(
         "phoneUse.home", "phoneUse.recents", "phoneUse.openNotifications",
         "phoneUse.openQuickSettings", "phoneUse.scrollDown", "phoneUse.scrollUp",
         "phoneUse.scrollLeft", "phoneUse.scrollRight",
-        "phoneUse.waitForElement", "phoneUse.inputKey"
+        "phoneUse.waitForElement", "phoneUse.inputKey",
+        "phoneUse.unlock", "phoneUse.lockScreen",
+        "phoneUse.wakeScreen", "phoneUse.isScreenOn"
     )
 
     /**
@@ -109,7 +111,7 @@ class GatewayClient(
 
         val request = Request.Builder()
             .url(params.wsUrl)
-            .header("User-Agent", "OpenClawPhoneUse/2.0.20")
+            .header("User-Agent", "OpenClawPhoneUse/2.0.21")
             .build()
 
         Log.i(TAG, "Connecting to ${params.wsUrl} (gen=$gen, backoff=${currentBackoffMs}ms)")
@@ -303,7 +305,7 @@ class GatewayClient(
                 .put("maxProtocol", PROTOCOL_VERSION)
                 .put("client", JSONObject()
                     .put("id", "openclaw-android")
-                    .put("version", "2.0.20")
+                    .put("version", "2.0.21")
                     .put("platform", "android")
                     .put("mode", "node")
                     .put("deviceFamily", deviceFamily))
@@ -317,7 +319,7 @@ class GatewayClient(
                     .put("screenCapture", PhoneUseService.instance != null))
                 .put("auth", JSONObject().put("token", authToken))
                 .put("locale", "zh-CN")
-                .put("userAgent", "openclaw-phoneuse/2.0.20 (${Build.MODEL})")
+                .put("userAgent", "openclaw-phoneuse/2.0.21 (${Build.MODEL})")
                 .put("device", JSONObject()
                     .put("id", id.deviceId)
                     .put("publicKey", id.publicKey)

@@ -84,43 +84,48 @@ Download the latest APK from [Releases](https://github.com/WqyJh/openclaw-phoneu
 
 These are recognized by the Gateway's built-in `nodes` tool:
 
-| Command | Parameters | Description |
-|---------|-----------|-------------|
-| `camera.snap` | `{maxWidth?, quality?}` | Screenshot (JPEG, compressed) |
-| `camera.list` | `{}` | List available capture sources |
-| `screen.record` | `{}` | Screen capture (returns screenshot) |
-| `location.get` | `{}` | GPS/network location |
-| `notifications.list` | `{}` | List active notifications |
-| `system.run` | `{command}` | Execute shell command |
-| `system.notify` | `{title, body}` | Show Android notification |
+| Command | Parameters | Min API | Description |
+|---------|-----------|---------|-------------|
+| `camera.snap` | `{maxWidth?, quality?}` | **30 (11)** | Screenshot (JPEG, compressed) |
+| `camera.list` | `{}` | 26 (8.0) | List available capture sources |
+| `camera.clip` | `{durationMs?, fps?, maxWidth?}` | **30 (11)** | Short video clip (MJPEG frames) |
+| `screen.record` | `{durationMs?, fps?, maxWidth?}` | **30 (11)** | Screen recording (MJPEG frames) |
+| `location.get` | `{}` | 26 (8.0) | GPS/network location |
+| `notifications.list` | `{}` | 26 (8.0) | List active notifications |
+| `system.run` | `{command}` | 26 (8.0) | Execute shell command |
+| `system.notify` | `{title, body}` | 26 (8.0) | Show Android notification |
 
 ### PhoneUse Commands
 
 These provide full UI automation via Accessibility Service:
 
-| Command | Parameters | Description |
-|---------|-----------|-------------|
-| `phoneUse.tap` | `{x, y}` | Tap at coordinates |
-| `phoneUse.doubleTap` | `{x, y}` | Double tap |
-| `phoneUse.longTap` | `{x, y, duration?}` | Long press (default 1000ms) |
-| `phoneUse.swipe` | `{x1, y1, x2, y2, duration?}` | Swipe gesture |
-| `phoneUse.pinch` | `{x, y, zoomIn, span?, duration?}` | Pinch zoom |
-| `phoneUse.setText` | `{text, fieldIndex?}` | Set text in input field |
-| `phoneUse.typeText` | `{text}` | Paste text via clipboard |
-| `phoneUse.findAndClick` | `{text?, resourceId?, timeout?}` | Find element and click |
-| `phoneUse.screenshot` | `{maxWidth?, quality?}` | Compressed screenshot |
-| `phoneUse.getUITree` | `{interactiveOnly?}` | Accessibility tree as JSON |
-| `phoneUse.getScreenInfo` | `{}` | Screen dimensions & device info |
-| `phoneUse.launch` | `{app?, package?}` | Launch app by name or package |
-| `phoneUse.back` | `{}` | Back button |
-| `phoneUse.home` | `{}` | Home button |
-| `phoneUse.recents` | `{}` | Recent apps |
-| `phoneUse.scrollDown/Up` | `{}` | Scroll vertically |
-| `phoneUse.scrollLeft/Right` | `{}` | Scroll horizontally |
-| `phoneUse.openNotifications` | `{}` | Pull down notification shade |
-| `phoneUse.openQuickSettings` | `{}` | Pull down quick settings |
-| `phoneUse.waitForElement` | `{text?, resourceId?, timeout?}` | Wait for element to appear |
-| `phoneUse.inputKey` | `{keyCode}` | Send key event (66=Enter, 67=Delete) |
+| Command | Parameters | Min API | Description |
+|---------|-----------|---------|-------------|
+| `phoneUse.tap` | `{x, y}` | 26 (8.0) | Tap at coordinates |
+| `phoneUse.doubleTap` | `{x, y}` | 26 (8.0) | Double tap |
+| `phoneUse.longTap` | `{x, y, duration?}` | 26 (8.0) | Long press (default 1000ms) |
+| `phoneUse.swipe` | `{x1, y1, x2, y2, duration?}` | 26 (8.0) | Swipe gesture |
+| `phoneUse.pinch` | `{x, y, zoomIn, span?, duration?}` | 26 (8.0) | Pinch zoom |
+| `phoneUse.setText` | `{text, fieldIndex?}` | 26 (8.0) | Set text in input field |
+| `phoneUse.typeText` | `{text}` | 26 (8.0) | Paste text via clipboard |
+| `phoneUse.findAndClick` | `{text?, resourceId?, timeout?}` | 26 (8.0) | Find element and click |
+| `phoneUse.screenshot` | `{maxWidth?, quality?}` | **30 (11)** | Compressed screenshot |
+| `phoneUse.getUITree` | `{interactiveOnly?}` | 26 (8.0) | Accessibility tree as JSON |
+| `phoneUse.getScreenInfo` | `{}` | 26 (8.0) | Screen dimensions & device info |
+| `phoneUse.launch` | `{app?, package?}` | 26 (8.0) | Launch app by name or package |
+| `phoneUse.back` | `{}` | 26 (8.0) | Back button |
+| `phoneUse.home` | `{}` | 26 (8.0) | Home button |
+| `phoneUse.recents` | `{}` | 26 (8.0) | Recent apps |
+| `phoneUse.scrollDown/Up` | `{}` | 26 (8.0) | Scroll vertically |
+| `phoneUse.scrollLeft/Right` | `{}` | 26 (8.0) | Scroll horizontally |
+| `phoneUse.openNotifications` | `{}` | 26 (8.0) | Pull down notification shade |
+| `phoneUse.openQuickSettings` | `{}` | 26 (8.0) | Pull down quick settings |
+| `phoneUse.waitForElement` | `{text?, resourceId?, timeout?}` | 26 (8.0) | Wait for element to appear |
+| `phoneUse.inputKey` | `{keyCode}` | 26 (8.0) | Send key event (66=Enter, 67=Del) |
+| `phoneUse.unlock` | `{pin?}` | **28 (9.0)** | Unlock screen (optional PIN) |
+| `phoneUse.lockScreen` | `{}` | **28 (9.0)** | Lock the screen |
+| `phoneUse.wakeScreen` | `{}` | 26 (8.0) | Wake screen temporarily (10s) |
+| `phoneUse.isScreenOn` | `{}` | 26 (8.0) | Check if screen is on |
 
 ## Gateway Setup
 

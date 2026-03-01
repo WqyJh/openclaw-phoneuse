@@ -352,6 +352,56 @@ class CommandHandler {
                 successResult("inputKey", ok, "Key event $keyCode sent")
             }
 
+            "phoneUse.unlock" -> {
+                val pin = params.optString("pin", "")
+                // Wake screen first
+                GatewayForegroundService.keepAlive?.wakeScreenTemporarily()
+                kotlinx.coroutines.delay(500)
+                
+                if (pin.isEmpty()) {
+                    // No PIN — just dismiss lock screen (swipe/none lock)
+                    val ok = svc.dismissLockScreen()
+                    if (ok) {
+                        kotlinx.coroutines.delay(500)
+                        successResult("unlock", true, "Lock screen dismissed (no PIN)")
+                    } else {
+                        errorResult("Failed to dismiss lock screen. Requires Android 9+ (API 28).")
+                    }
+                } else {
+                    // PIN unlock
+                    val ok = svc.unlockWithPin(pin)
+                    if (ok) {
+                        successResult("unlock", true, "Unlocked with PIN")
+                    } else {
+                        errorResult("PIN unlock failed. Check PIN or screen state.")
+                    }
+                }
+            }
+
+            "phoneUse.lockScreen" -> {
+                val ok = svc.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)
+                successResult("lockScreen", ok, "Screen locked")
+            }
+
+            "phoneUse.wakeScreen" -> {
+                GatewayForegroundService.keepAlive?.wakeScreenTemporarily()
+                kotlinx.coroutines.delay(300)
+                val isOn = GatewayForegroundService.keepAlive?.isScreenOn() ?: false
+                JSONObject()
+                    .put("ok", true)
+                    .put("command", "wakeScreen")
+                    .put("screenOn", isOn)
+                    .put("message", if (isOn) "Screen is on" else "Wake requested")
+            }
+
+            "phoneUse.isScreenOn" -> {
+                val isOn = GatewayForegroundService.keepAlive?.isScreenOn() ?: false
+                JSONObject()
+                    .put("ok", true)
+                    .put("command", "isScreenOn")
+                    .put("screenOn", isOn)
+            }
+
             else -> errorResult("Unknown command: $command")
         }
     }

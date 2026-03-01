@@ -70,6 +70,8 @@ class GatewayForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // If service is restarted by system (START_STICKY), intent may be null
+        // Try to get params from intent, fall back to stored prefs
         val host = intent?.getStringExtra("host") ?: "localhost"
         val port = intent?.getIntExtra("port", 18789) ?: 18789
         val token = intent?.getStringExtra("token") ?: ""

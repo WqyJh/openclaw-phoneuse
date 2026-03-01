@@ -109,7 +109,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Version display
-        binding.versionText.text = "v19 • ${Build.MODEL}"
+        binding.versionText.text = "v20 • ${Build.MODEL}"
 
         // Device ID display
         try {
@@ -160,7 +160,7 @@ class MainActivity : AppCompatActivity() {
                 sb.appendLine("Time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}")
                 sb.appendLine("Device: ${Build.MODEL} (${Build.MANUFACTURER})")
                 sb.appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-                sb.appendLine("App Version: 2.0.0-v19")
+                sb.appendLine("App Version: 2.0.0-v20")
                 sb.appendLine()
 
                 // UI Command Log
@@ -292,6 +292,17 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         updateAccessibilityStatus()
         updateScreenCaptureStatus()
+        
+        // Every time app comes to foreground, check if we need to reconnect
+        val client = GatewayForegroundService.gatewayClient
+        if (client == null) {
+            // Service not running - try auto connect
+            autoConnectIfReady()
+        } else {
+            // Service exists - update button states
+            binding.connectButton.isEnabled = false
+            binding.disconnectButton.isEnabled = true
+        }
     }
 
     override fun onDestroy() {

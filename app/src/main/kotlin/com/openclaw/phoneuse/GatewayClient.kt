@@ -109,7 +109,7 @@ class GatewayClient(
 
         val request = Request.Builder()
             .url(params.wsUrl)
-            .header("User-Agent", "OpenClawPhoneUse/2.0.19")
+            .header("User-Agent", "OpenClawPhoneUse/2.0.20")
             .build()
 
         Log.i(TAG, "Connecting to ${params.wsUrl} (gen=$gen, backoff=${currentBackoffMs}ms)")
@@ -171,9 +171,13 @@ class GatewayClient(
         val delay = currentBackoffMs
         currentBackoffMs = (currentBackoffMs * 1.5).toLong().coerceAtMost(MAX_BACKOFF_MS)
         
-        Log.i(TAG, "Reconnecting in ${delay}ms (backoff will be ${currentBackoffMs}ms next)")
+        Log.i(TAG, "Reconnecting in ${delay}ms (backoff=${currentBackoffMs}ms, gen=$generation)")
         
-        scope?.launch {
+        // Ensure we have a live scope for the reconnect timer
+        val activeScope = scope?.takeIf { it.isActive }
+            ?: CoroutineScope(Dispatchers.IO + SupervisorJob()).also { scope = it }
+        
+        activeScope.launch {
             delay(delay)
             if (shouldReconnect && generation == connectGeneration.get()) {
                 connecting.set(false)  // Allow new connect
@@ -299,7 +303,7 @@ class GatewayClient(
                 .put("maxProtocol", PROTOCOL_VERSION)
                 .put("client", JSONObject()
                     .put("id", "openclaw-android")
-                    .put("version", "2.0.19")
+                    .put("version", "2.0.20")
                     .put("platform", "android")
                     .put("mode", "node")
                     .put("deviceFamily", deviceFamily))
@@ -313,7 +317,7 @@ class GatewayClient(
                     .put("screenCapture", PhoneUseService.instance != null))
                 .put("auth", JSONObject().put("token", authToken))
                 .put("locale", "zh-CN")
-                .put("userAgent", "openclaw-phoneuse/2.0.19 (${Build.MODEL})")
+                .put("userAgent", "openclaw-phoneuse/2.0.20 (${Build.MODEL})")
                 .put("device", JSONObject()
                     .put("id", id.deviceId)
                     .put("publicKey", id.publicKey)

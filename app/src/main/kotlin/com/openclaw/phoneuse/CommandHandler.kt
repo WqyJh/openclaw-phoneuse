@@ -60,22 +60,79 @@ class CommandHandler {
             }
 
             "camera.clip" -> {
-                // Short clip = multi-frame capture as base64 MJPEG
+                // Short video clip via MediaProjection
                 val durationMs = params.optLong("durationMs", 2000)
-                val fps = params.optInt("fps", 5)
-                val maxWidth = params.optInt("maxWidth", 480)
-                val quality = params.optInt("quality", 50)
-                captureScreenRecord(svc, durationMs, fps, maxWidth, quality)
+                val fps = params.optInt("fps", 15)
+                val maxWidth = params.optInt("maxWidth", 720)
+
+                if (!ScreenCaptureManager.hasPermission()) {
+                    // Fallback to accessibility screenshot
+                    return captureForGateway(svc, maxWidth, 60)
+                }
+
+                val recorder = ScreenRecorder(svc.applicationContext)
+                val result = recorder.record(ScreenRecorder.RecordingParams(durationMs = durationMs, fps = fps, maxWidth = maxWidth))
+                if (result == null) {
+                    return captureForGateway(svc, maxWidth, 60)
+                }
+
+                val response = JSONObject()
+                    .put("format", result.format)
+                    .put("durationMs", result.durationMs)
+                    .put("sizeBytes", result.sizeBytes)
+                if (result.sizeBytes <= 10 * 1024 * 1024) {
+                    try {
+                        val bytes = java.io.File(result.filePath).readBytes()
+                        response.put("base64", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
+                    } catch (_: Exception) {}
+                }
+                response
             }
 
             "screen.record" -> {
-                // Screen recording: capture multiple frames, encode as base64
-                // Gateway expects: {format, base64, durationMs?, fps?}
-                val durationMs = params.optLong("durationMs", 3000)
-                val fps = params.optInt("fps", 5)
-                val maxWidth = params.optInt("maxWidth", 480)
-                val quality = params.optInt("quality", 50)
-                captureScreenRecord(svc, durationMs, fps, maxWidth, quality)
+                // Real MP4 screen recording via MediaProjection + MediaRecorder
+                val durationMs = params.optLong("durationMs", 5000)
+                val fps = params.optInt("fps", 15)
+                val bitrate = params.optInt("bitrate", 2_000_000)
+                val maxWidth = params.optInt("maxWidth", 720)
+                val inlineThreshold = params.optInt("inlineThreshold", 10 * 1024 * 1024) // 10MB
+
+                if (!ScreenCaptureManager.hasPermission()) {
+                    return errorResult("MediaProjection not authorized. Open the app and tap 'Enable Screen Capture' first.")
+                }
+
+                val recorder = ScreenRecorder(svc.applicationContext)
+                val result = recorder.record(ScreenRecorder.RecordingParams(
+                    durationMs = durationMs,
+                    fps = fps,
+                    bitrate = bitrate,
+                    maxWidth = maxWidth
+                ))
+
+                if (result == null) {
+                    return errorResult("Screen recording failed. Check logcat for details.")
+                }
+
+                val response = JSONObject()
+                    .put("format", result.format)
+                    .put("durationMs", result.durationMs)
+                    .put("width", result.width)
+                    .put("height", result.height)
+                    .put("sizeBytes", result.sizeBytes)
+                    .put("recordingId", result.filePath)  // For file.read if needed
+
+                // Inline base64 if small enough
+                if (result.sizeBytes <= inlineThreshold) {
+                    try {
+                        val bytes = java.io.File(result.filePath).readBytes()
+                        val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                        response.put("base64", base64)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to read recording file: ${e.message}")
+                    }
+                }
+
+                response
             }
 
             "location.get" -> {
@@ -351,6 +408,62 @@ class CommandHandler {
                 val ok = svc.inputKeyEvent(keyCode)
                 successResult("inputKey", ok, "Key event $keyCode sent")
             }
+
+            // ========== File Transfer ==========
+
+            "file.read" -> {
+                val fileId = params.optString("id", "")
+                val offset = params.optLong("offset", 0)
+                val size = params.optInt("size", 2 * 1024 * 1024) // Default 2MB chunks
+                if (fileId.isEmpty()) return errorResult("Missing file id")
+
+                try {
+                    val file = java.io.File(fileId)
+                    if (!file.exists()) return errorResult("File not found: $fileId")
+                    val total = file.length()
+                    val actualOffset = offset.coerceIn(0, total)
+                    val actualSize = size.toLong().coerceIn(0, total - actualOffset).toInt()
+                    val buffer = ByteArray(actualSize)
+                    java.io.RandomAccessFile(file, "r").use { raf ->
+                        raf.seek(actualOffset)
+                        raf.readFully(buffer)
+                    }
+                    val base64 = android.util.Base64.encodeToString(buffer, android.util.Base64.NO_WRAP)
+                    JSONObject()
+                        .put("ok", true)
+                        .put("base64", base64)
+                        .put("offset", actualOffset)
+                        .put("size", actualSize)
+                        .put("total", total)
+                        .put("done", actualOffset + actualSize >= total)
+                } catch (e: Exception) {
+                    errorResult("file.read failed: ${e.message}")
+                }
+            }
+
+            "file.list" -> {
+                val dir = java.io.File(svc.applicationContext.cacheDir, "recordings")
+                val files = dir.listFiles()?.map { f ->
+                    JSONObject()
+                        .put("id", f.absolutePath)
+                        .put("name", f.name)
+                        .put("size", f.length())
+                        .put("modified", f.lastModified())
+                } ?: emptyList()
+                JSONObject()
+                    .put("ok", true)
+                    .put("files", org.json.JSONArray(files))
+            }
+
+            "file.delete" -> {
+                val fileId = params.optString("id", "")
+                if (fileId.isEmpty()) return errorResult("Missing file id")
+                val file = java.io.File(fileId)
+                val deleted = file.exists() && file.delete()
+                successResult("file.delete", deleted, if (deleted) "Deleted" else "Not found")
+            }
+
+            // ========== Screen Lock ==========
 
             "phoneUse.unlock" -> {
                 val pin = params.optString("pin", "")

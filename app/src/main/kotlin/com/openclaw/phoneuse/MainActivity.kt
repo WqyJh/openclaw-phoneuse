@@ -213,6 +213,9 @@ class MainActivity : AppCompatActivity() {
         // Request notification permission (Android 13+)
         requestNotificationPermission()
 
+        // Request battery optimization exemption (critical for background WebSocket)
+        requestBatteryOptimizationExemption()
+
         // Auto-connect if we have a saved URL and accessibility is enabled
         autoConnectIfReady()
     }
@@ -247,6 +250,26 @@ class MainActivity : AppCompatActivity() {
                     arrayOf(Manifest.permission.POST_NOTIFICATIONS),
                     9003
                 )
+            }
+        }
+    }
+
+    /**
+     * Request exemption from battery optimization (Doze mode).
+     * This is critical for keeping WebSocket alive during deep sleep.
+     */
+    private fun requestBatteryOptimizationExemption() {
+        val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            try {
+                @Suppress("BatteryLife")
+                val intent = android.content.Intent(
+                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    android.net.Uri.parse("package:$packageName")
+                )
+                startActivity(intent)
+            } catch (e: Exception) {
+                appendLog("Battery optimization exemption request failed: ${e.message}")
             }
         }
     }

@@ -22,6 +22,8 @@ class GatewayForegroundService : Service() {
 
         var gatewayClient: GatewayClient? = null
             private set
+        var keepAlive: KeepAliveManager? = null
+            private set
 
         /**
          * Start with ConnectionParams (supports both manual host:port and URL mode).
@@ -56,6 +58,8 @@ class GatewayForegroundService : Service() {
         fun stop(context: Context) {
             gatewayClient?.disconnect()
             gatewayClient = null
+            keepAlive?.releaseAll()
+            keepAlive = null
             context.stopService(Intent(context, GatewayForegroundService::class.java))
         }
     }
@@ -92,6 +96,11 @@ class GatewayForegroundService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+
+        // Acquire persistent wake locks for background operation
+        val ka = KeepAliveManager(this)
+        ka.acquirePersistentLocks()
+        keepAlive = ka
 
         // Create and connect Gateway client
         val identity = DeviceIdentity(this)
@@ -142,6 +151,8 @@ class GatewayForegroundService : Service() {
         super.onDestroy()
         gatewayClient?.disconnect()
         gatewayClient = null
+        keepAlive?.releaseAll()
+        keepAlive = null
         Log.i(TAG, "Foreground service destroyed")
     }
 

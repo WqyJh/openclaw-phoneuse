@@ -29,6 +29,17 @@ class CommandHandler {
 
         Log.i(TAG, "Executing: $command with params: $params")
 
+        // Commands that need the screen on — wake it temporarily
+        val needsScreen = command.startsWith("phoneUse.") || 
+            command == "camera.snap" || command == "camera.clip" || command == "screen.record"
+        if (needsScreen) {
+            GatewayForegroundService.keepAlive?.wakeScreenTemporarily()
+            // Small delay to let screen actually turn on
+            if (GatewayForegroundService.keepAlive?.isScreenOn() != true) {
+                kotlinx.coroutines.delay(500)
+            }
+        }
+
         return when (command) {
             // ========== Standard OpenClaw node commands ==========
             

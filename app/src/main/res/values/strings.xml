@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenClaw PhoneUse</string>
+    <string name="accessibility_service_label">OpenClaw PhoneUse Agent</string>
+    <string name="accessibility_service_description">Allows OpenClaw AI agent to control your phone via accessibility actions (tap, swipe, read screen, input text). Only activate when connected to a trusted OpenClaw Gateway.</string>
+    <string name="gateway_host_hint">Gateway host (e.g. 192.168.1.100)</string>
+    <string name="gateway_port_hint">Port (default: 18789)</string>
+    <string name="gateway_token_hint">Gateway token</string>
+    <string name="btn_connect">Connect</string>
+    <string name="btn_disconnect">Disconnect</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_connected">Connected ✓</string>
+    <string name="status_paired">Paired ✓</string>
+    <string name="notification_channel_name">PhoneUse Agent</string>
+    <string name="notification_title">OpenClaw PhoneUse</string>
+    <string name="notification_text">Connected to Gateway — ready for commands</string>
+</resources>

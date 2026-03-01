@@ -1,0 +1,310 @@
+package com.openclaw.phoneuse
+
+import android.Manifest
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.app.Activity
+import android.content.*
+import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings
+import android.view.accessibility.AccessibilityManager
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import com.openclaw.phoneuse.databinding.ActivityMainBinding
+import java.text.SimpleDateFormat
+import java.util.*
+
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var binding: ActivityMainBinding
+    private val prefs by lazy { getSharedPreferences("gateway_config", MODE_PRIVATE) }
+    private val logLines = mutableListOf<String>()
+    private val dateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+
+    companion object {
+        private const val REQUEST_SCREEN_CAPTURE = 9002
+    }
+
+    private val statusReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                "com.openclaw.phoneuse.STATUS" -> {
+                    val status = intent.getStringExtra("status") ?: return
+                    runOnUiThread { updateConnectionStatus(status) }
+                }
+                "com.openclaw.phoneuse.COMMAND" -> {
+                    val command = intent.getStringExtra("command") ?: return
+                    val state = intent.getStringExtra("state") ?: return
+                    runOnUiThread { appendLog("$command → $state") }
+                }
+            }
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        // Restore saved config
+        binding.urlInput.setText(prefs.getString("url", "ws://192.168.1.100:18789"))
+        binding.tokenInput.setText(prefs.getString("token", ""))
+
+        // Connect button
+        binding.connectButton.setOnClickListener {
+            val urlText = binding.urlInput.text.toString().trim()
+            val token = binding.tokenInput.text.toString().trim()
+
+            if (urlText.isEmpty()) {
+                Toast.makeText(this, "Please enter Gateway URL", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (!isAccessibilityServiceEnabled()) {
+                Toast.makeText(this, "⚠️ Please enable Accessibility Service first!", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+
+            val params = ConnectionParams.fromUrl(urlText, token)
+            if (params == null) {
+                Toast.makeText(this, "Invalid URL format", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            prefs.edit()
+                .putString("url", urlText)
+                .putString("token", token)
+                .apply()
+
+            GatewayForegroundService.start(this, params)
+            
+            binding.connectButton.isEnabled = false
+            binding.disconnectButton.isEnabled = true
+            appendLog("Connecting to ${params.displayUrl}…")
+        }
+
+        // Disconnect button
+        binding.disconnectButton.setOnClickListener {
+            GatewayForegroundService.stop(this)
+            binding.connectButton.isEnabled = true
+            binding.disconnectButton.isEnabled = false
+            binding.statusText.text = getString(R.string.status_disconnected)
+            appendLog("Disconnected")
+        }
+
+        // Enable Accessibility button
+        binding.enableAccessibilityButton.setOnClickListener {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
+
+        // Enable Screen Capture button
+        binding.enableScreenCaptureButton.setOnClickListener {
+            val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            @Suppress("DEPRECATION")
+            startActivityForResult(mpm.createScreenCaptureIntent(), REQUEST_SCREEN_CAPTURE)
+        }
+
+        // Version display
+        binding.versionText.text = "v18 • ${Build.MODEL}"
+
+        // Device ID display
+        try {
+            val identity = DeviceIdentity(this).getOrCreate()
+            binding.deviceIdText.text = "Device ID: ${identity.deviceId}"
+        } catch (e: Exception) {
+            binding.deviceIdText.text = "Device ID: error - ${e.message}"
+        }
+
+        // Reset pairing button
+        binding.resetPairingButton.setOnClickListener {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Reset Pairing?")
+                .setMessage("This will generate a new device identity. You'll need to re-approve the device on the Gateway.\n\nCurrent connection will be disconnected.")
+                .setPositiveButton("Reset") { _, _ ->
+                    // Disconnect first
+                    GatewayForegroundService.stop(this)
+                    binding.connectButton.isEnabled = true
+                    binding.disconnectButton.isEnabled = false
+                    binding.statusText.text = getString(R.string.status_disconnected)
+
+                    // Clear ALL identity prefs (covers all versions)
+                    listOf("device_identity", "device_identity_v2", "device_identity_ed25519").forEach { name ->
+                        getSharedPreferences(name, MODE_PRIVATE).edit().clear().apply()
+                    }
+
+                    // Regenerate identity
+                    try {
+                        val newIdentity = DeviceIdentity(this).getOrCreate()
+                        binding.deviceIdText.text = "Device ID: ${newIdentity.deviceId}"
+                        appendLog("Identity reset! New ID: ${newIdentity.deviceId.take(16)}...")
+                        Toast.makeText(this, "New identity generated. Reconnect and approve on Gateway.", Toast.LENGTH_LONG).show()
+                    } catch (e: Exception) {
+                        appendLog("Identity reset failed: ${e.message}")
+                        Toast.makeText(this, "Reset failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+
+        // Export log button - includes UI log + logcat
+        binding.exportLogButton.setOnClickListener {
+            Toast.makeText(this, "Collecting logs...", Toast.LENGTH_SHORT).show()
+            Thread {
+                val sb = StringBuilder()
+                sb.appendLine("===== OpenClaw PhoneUse Log =====")
+                sb.appendLine("Time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}")
+                sb.appendLine("Device: ${Build.MODEL} (${Build.MANUFACTURER})")
+                sb.appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+                sb.appendLine("App Version: 2.0.0-v18")
+                sb.appendLine()
+
+                // UI Command Log
+                sb.appendLine("===== Command Log =====")
+                logLines.forEach { sb.appendLine(it) }
+                sb.appendLine()
+
+                // Connection state
+                sb.appendLine("===== Connection State =====")
+                sb.appendLine("Accessibility: ${PhoneUseService.instance != null}")
+                sb.appendLine("ScreenCapture: ${ScreenCaptureManager.hasPermission()}")
+                sb.appendLine("Gateway: ${GatewayForegroundService.gatewayClient != null}")
+                sb.appendLine()
+
+                // Logcat (last 500 lines, filtered to our app)
+                sb.appendLine("===== Logcat =====")
+                try {
+                    val process = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "500", "--pid=${android.os.Process.myPid()}"))
+                    val logcat = process.inputStream.bufferedReader().readText()
+                    sb.append(logcat)
+                } catch (e: Exception) {
+                    sb.appendLine("Failed to read logcat: ${e.message}")
+                }
+
+                val fullLog = sb.toString()
+                runOnUiThread {
+                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(android.content.Intent.EXTRA_SUBJECT, "OpenClaw PhoneUse Debug Log")
+                        putExtra(android.content.Intent.EXTRA_TEXT, fullLog)
+                    }
+                    startActivity(android.content.Intent.createChooser(intent, "Export Log"))
+                }
+            }.start()
+        }
+
+        // Register broadcast receivers
+        val filter = IntentFilter().apply {
+            addAction("com.openclaw.phoneuse.STATUS")
+            addAction("com.openclaw.phoneuse.COMMAND")
+        }
+        registerReceiver(statusReceiver, filter, RECEIVER_NOT_EXPORTED)
+
+        // Check if already connected
+        if (GatewayForegroundService.gatewayClient != null) {
+            binding.connectButton.isEnabled = false
+            binding.disconnectButton.isEnabled = true
+        }
+
+        // Request notification permission (Android 13+)
+        requestNotificationPermission()
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    9003
+                )
+            }
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_SCREEN_CAPTURE) {
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                ScreenCaptureManager.storePermission(resultCode, data)
+                appendLog("Screen capture permission granted ✓")
+                updateScreenCaptureStatus()
+            } else {
+                appendLog("Screen capture permission denied")
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateAccessibilityStatus()
+        updateScreenCaptureStatus()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try { unregisterReceiver(statusReceiver) } catch (_: Exception) {}
+    }
+
+    private fun updateAccessibilityStatus() {
+        val enabled = isAccessibilityServiceEnabled()
+        binding.accessibilityStatus.text = if (enabled) "Accessibility: Enabled ✓" else "Accessibility: Not enabled ⚠️"
+        binding.accessibilityStatus.setTextColor(if (enabled) 0xFF008800.toInt() else 0xFFCC0000.toInt())
+    }
+
+    private fun updateScreenCaptureStatus() {
+        val enabled = ScreenCaptureManager.hasPermission()
+        binding.screenCaptureStatus.text = if (enabled) "Screen Capture: Enabled ✓" else "Screen Capture: Not enabled ⚠️"
+        binding.screenCaptureStatus.setTextColor(if (enabled) 0xFF008800.toInt() else 0xFFCC0000.toInt())
+    }
+
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        val am = getSystemService(AccessibilityManager::class.java) ?: return false
+        return am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+            .any { it.resolveInfo.serviceInfo.name == PhoneUseService::class.java.name }
+    }
+
+    private fun updateConnectionStatus(status: String) {
+        binding.statusText.text = when {
+            status == "connecting" -> {
+                binding.connectButton.isEnabled = false
+                binding.disconnectButton.isEnabled = true
+                getString(R.string.status_connecting)
+            }
+            status == "connected" -> {
+                binding.connectButton.isEnabled = false
+                binding.disconnectButton.isEnabled = true
+                getString(R.string.status_connected)
+            }
+            status == "paired" -> {
+                binding.connectButton.isEnabled = false
+                binding.disconnectButton.isEnabled = true
+                getString(R.string.status_paired)
+            }
+            status == "disconnected" -> {
+                binding.connectButton.isEnabled = true
+                binding.disconnectButton.isEnabled = false
+                getString(R.string.status_disconnected)
+            }
+            status.startsWith("error:") -> {
+                // Don't change button state on error - auto-reconnect handles it
+                "Error: ${status.removePrefix("error:")}"
+            }
+            else -> status
+        }
+        appendLog("Status: $status")
+    }
+
+    private fun appendLog(message: String) {
+        val timestamp = dateFormat.format(Date())
+        logLines.add("[$timestamp] $message")
+        if (logLines.size > 50) logLines.removeAt(0)
+        binding.logText.text = logLines.joinToString("\n")
+    }
+}

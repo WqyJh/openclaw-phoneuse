@@ -490,52 +490,119 @@ class PhoneUseService : AccessibilityService() {
     }
 
     /**
-     * Unlock with PIN by dismissing keyguard then tapping digits.
-     * @return true if all steps completed
+     * Unlock with PIN by dismissing keyguard then rapidly tapping PIN digits.
+     * All digits are tapped locally in one shot — no round-trips to server.
      */
     suspend fun unlockWithPin(pin: String): Boolean {
-        // Step 1: Dismiss lock screen (shows PIN input for secured locks)
+        // Step 1: Dismiss lock screen
         dismissLockScreen()
-        kotlinx.coroutines.delay(500)
+        kotlinx.coroutines.delay(800)
 
-        // Check if we're already unlocked (swipe/none lock)
-        val root1 = rootInActiveWindow
-        val pkg1 = root1?.packageName?.toString() ?: ""
-        root1?.recycle()
-        if (pkg1 != "com.android.systemui") {
+        // Check if already unlocked
+        if (!isSystemUI()) {
             Log.i(TAG, "Already unlocked (no PIN needed)")
             return true
         }
 
-        // Step 2: Try to find and tap PIN digits
-        for (digit in pin) {
-            val digitStr = digit.toString()
-            // Try finding the digit button by text
-            val found = findAndClick(digitStr, 1500)
-            if (!found) {
-                Log.w(TAG, "Could not find digit button: $digitStr")
-                return false
-            }
-            kotlinx.coroutines.delay(100)
+        // Step 2: Find PIN pad layout by scanning UI tree for digit buttons
+        val digitLocations = findPinPadDigits()
+        if (digitLocations.isEmpty()) {
+            Log.w(TAG, "PIN pad not found, trying text-based fallback")
+            return unlockWithPinTextFallback(pin)
         }
 
-        // Step 3: Try pressing Enter/OK to confirm
-        kotlinx.coroutines.delay(200)
-        // Many PIN screens auto-confirm after all digits, but try Enter anyway
-        val enterFound = findAndClick("OK", 500) ||
-            findAndClick("确认", 500) ||
-            findAndClick("Enter", 500)
-        // Some PINs (4-6 digit) auto-unlock, so not finding Enter is OK
+        // Step 3: Tap all digits rapidly (50ms between each)
+        for (digit in pin) {
+            val loc = digitLocations[digit] ?: run {
+                Log.w(TAG, "Digit '$digit' not found on PIN pad")
+                return false
+            }
+            tap(loc.first, loc.second)
+            kotlinx.coroutines.delay(50)  // Minimal delay between taps
+        }
+
+        // Step 4: Try confirm (many PIN pads auto-confirm)
+        kotlinx.coroutines.delay(300)
+        val confirmLoc = digitLocations['✓'] ?: digitLocations['E']
+        if (confirmLoc != null) {
+            tap(confirmLoc.first, confirmLoc.second)
+        } else {
+            // Try finding OK/Enter/确认 button
+            findAndClick("OK", 300) || findAndClick("确认", 300) || findAndClick("确定", 300)
+        }
 
         kotlinx.coroutines.delay(500)
-
-        // Verify unlock
-        val root2 = rootInActiveWindow
-        val pkg2 = root2?.packageName?.toString() ?: ""
-        root2?.recycle()
-        val unlocked = pkg2 != "com.android.systemui"
-        Log.i(TAG, "Unlock result: $unlocked (foreground: $pkg2)")
+        val unlocked = !isSystemUI()
+        Log.i(TAG, "Unlock result: $unlocked")
         return unlocked
+    }
+
+    private fun isSystemUI(): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val pkg = root.packageName?.toString() ?: ""
+        root.recycle()
+        return pkg == "com.android.systemui"
+    }
+
+    /**
+     * Scan accessibility tree to find PIN pad digit button coordinates.
+     * Returns map: char -> (centerX, centerY)
+     */
+    private fun findPinPadDigits(): Map<Char, Pair<Float, Float>> {
+        val root = rootInActiveWindow ?: return emptyMap()
+        val result = mutableMapOf<Char, Pair<Float, Float>>()
+
+        for (digit in '0'..'9') {
+            val nodes = root.findAccessibilityNodeInfosByText(digit.toString())
+            for (node in nodes) {
+                if (node.isVisibleToUser && (node.isClickable || node.parent?.isClickable == true)) {
+                    val bounds = android.graphics.Rect()
+                    node.getBoundsInScreen(bounds)
+                    val cx = (bounds.left + bounds.right) / 2f
+                    val cy = (bounds.top + bounds.bottom) / 2f
+                    // Only accept if it looks like a PIN pad button (reasonable size)
+                    if (bounds.width() > 30 && bounds.height() > 30) {
+                        result[digit] = Pair(cx, cy)
+                    }
+                }
+                node.recycle()
+            }
+        }
+
+        // Also find confirm/enter button
+        for (label in listOf("OK", "确认", "确定", "Enter", "✓")) {
+            val nodes = root.findAccessibilityNodeInfosByText(label)
+            for (node in nodes) {
+                if (node.isVisibleToUser) {
+                    val bounds = android.graphics.Rect()
+                    node.getBoundsInScreen(bounds)
+                    result['✓'] = Pair((bounds.left + bounds.right) / 2f, (bounds.top + bounds.bottom) / 2f)
+                }
+                node.recycle()
+            }
+            if ('✓' in result) break
+        }
+
+        root.recycle()
+        Log.i(TAG, "PIN pad found ${result.size} buttons: ${result.keys}")
+        return result
+    }
+
+    /**
+     * Fallback: tap PIN digits by finding text nodes (slower but more compatible).
+     */
+    private suspend fun unlockWithPinTextFallback(pin: String): Boolean {
+        for (digit in pin) {
+            if (!findAndClick(digit.toString(), 1000)) {
+                Log.w(TAG, "Text fallback: digit '$digit' not found")
+                return false
+            }
+            kotlinx.coroutines.delay(80)
+        }
+        kotlinx.coroutines.delay(300)
+        findAndClick("OK", 300) || findAndClick("确认", 300)
+        kotlinx.coroutines.delay(500)
+        return !isSystemUI()
     }
 
     // ========== Scroll ==========

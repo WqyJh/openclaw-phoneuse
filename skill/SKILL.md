@@ -39,9 +39,9 @@ The sub-agent MUST exit after completing its task — do not keep it running.
 - Use lower quality when possible: `{maxWidth: 480, quality: 30}` → ~20KB
 - **Never reference raw base64** in your responses — describe what you see in words
 
-### Rule 3: Clean up recordings
+### Rule 3: Keep files on device, not in context
 
-After downloading a screen recording via `file.read`, delete it with `file.delete` to free storage.
+Screen recordings and large files should stay on the phone — don't load them into context. Use `file.read` only when you need to transfer to the server. The files remain on the device for later access.
 
 ## Before You Start
 

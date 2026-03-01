@@ -71,12 +71,20 @@ All commands use the `nodes` tool:
 
 ## Essential Commands
 
-### See the screen
+### See the screen (preferred — file-based, no context bloat)
+
+Use the `nodes` tool's built-in `camera_snap` action (NOT invoke):
 
 ```json
-{"invokeCommand": "phoneUse.screenshot", "invokeParamsJson": "{}"}
+{"action": "camera_snap", "node": "<nodeId>"}
 ```
-Returns compressed JPEG base64. Default 720p quality 60.
+
+This saves the screenshot to a file on the server and returns a local path. The image does NOT stay in context as raw base64.
+
+**Only use `phoneUse.screenshot` via invoke if you need custom parameters:**
+```json
+{"action": "invoke", "node": "<nodeId>", "invokeCommand": "phoneUse.screenshot", "invokeParamsJson": "{\"maxWidth\": 480, \"quality\": 30}"}
+```
 
 ### Get interactive elements
 

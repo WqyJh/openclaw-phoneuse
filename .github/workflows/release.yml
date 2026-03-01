@@ -23,16 +23,36 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug
+      - name: Decode keystore
+        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > /tmp/release.keystore
 
-      - name: Rename APK
+      - name: Build Release APKs
+        env:
+          KEYSTORE_PATH: ${{ secrets.KEYSTORE_BASE64 != '' && '/tmp/release.keystore' || '' }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease
+
+      - name: Rename APKs
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
-          cp app/build/outputs/apk/debug/app-debug.apk openclaw-phoneuse-${VERSION}-debug.apk
+          mkdir -p dist
+          for apk in app/build/outputs/apk/release/*.apk; do
+            filename=$(basename "$apk" .apk)
+            # Extract ABI from filename (app-arm64-v8a-release → arm64-v8a)
+            abi=$(echo "$filename" | sed 's/app-//;s/-release//')
+            if [ "$abi" = "universal" ]; then
+              cp "$apk" "dist/openclaw-phoneuse-${VERSION}-universal.apk"
+            else
+              cp "$apk" "dist/openclaw-phoneuse-${VERSION}-${abi}.apk"
+            fi
+          done
+          ls -lh dist/
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: openclaw-phoneuse-*-debug.apk
+          files: dist/openclaw-phoneuse-*.apk
           generate_release_notes: true

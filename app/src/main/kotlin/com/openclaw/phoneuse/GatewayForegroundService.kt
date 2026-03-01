@@ -30,29 +30,14 @@ class GatewayForegroundService : Service() {
          */
         fun start(context: Context, params: ConnectionParams) {
             val intent = Intent(context, GatewayForegroundService::class.java).apply {
-                putExtra("host", params.host)
-                putExtra("port", params.port)
+                putExtra("url", params.wsUrl)
                 putExtra("token", params.token)
-                putExtra("useWss", params.useWss)
-                putExtra("url", params.url)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
             }
-        }
-
-        /**
-         * Legacy start method for backward compatibility.
-         */
-        fun start(context: Context, host: String, port: Int, token: String) {
-            val params = ConnectionParams(
-                host = host,
-                port = port,
-                token = token
-            )
-            start(context, params)
         }
 
         fun stop(context: Context) {
@@ -70,24 +55,26 @@ class GatewayForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // If service is restarted by system (START_STICKY), intent may be null
-        // Try to get params from intent, fall back to stored prefs
-        val host = intent?.getStringExtra("host") ?: "localhost"
-        val port = intent?.getIntExtra("port", 18789) ?: 18789
-        val token = intent?.getStringExtra("token") ?: ""
-        val useWss = intent?.getBooleanExtra("useWss", false) ?: false
-        val url = intent?.getStringExtra("url")
+        // If service is restarted by system (START_STICKY), intent is null
+        // Fall back to SharedPreferences for saved connection params
+        val prefs = getSharedPreferences("gateway_config", MODE_PRIVATE)
+        val url = intent?.getStringExtra("url") ?: prefs.getString("url", null)
+        val token = intent?.getStringExtra("token") ?: prefs.getString("token", "") ?: ""
 
-        // Build connection params
-        val params = if (url != null) {
-            ConnectionParams.fromUrl(url, token) ?: ConnectionParams(
-                host = host, port = port, token = token, useWss = useWss
-            )
-        } else {
-            ConnectionParams(
-                host = host, port = port, token = token, useWss = useWss
-            )
+        if (url.isNullOrEmpty()) {
+            Log.w(TAG, "No URL available (intent=$intent), stopping service")
+            stopSelf()
+            return START_NOT_STICKY
         }
+
+        // Build connection params from URL
+        val params = ConnectionParams.fromUrl(url, token)
+        if (params == null) {
+            Log.w(TAG, "Failed to parse URL: $url")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        Log.i(TAG, "Starting with URL: ${params.displayUrl} (from ${if (intent != null) "intent" else "prefs"})")
 
         // Show persistent notification
         val notification = buildNotification("Connecting to ${params.displayUrl}…")

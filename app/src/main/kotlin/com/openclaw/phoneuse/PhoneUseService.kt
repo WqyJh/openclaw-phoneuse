@@ -445,17 +445,40 @@ class PhoneUseService : AccessibilityService() {
     fun launchApp(nameOrPackage: String): Boolean {
         return try {
             val pm = applicationContext.packageManager
+
+            // Strategy 1: Direct package name match
             var intent = pm.getLaunchIntentForPackage(nameOrPackage)
 
+            // Strategy 2: Search launcher apps by display name (exact then contains)
+            if (intent == null) {
+                val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                val launcherApps = pm.queryIntentActivities(launcherIntent, 0)
+                
+                // Exact match first
+                val exactMatch = launcherApps.firstOrNull {
+                    it.loadLabel(pm).toString().equals(nameOrPackage, ignoreCase = true)
+                }
+                // Contains match as fallback
+                val containsMatch = exactMatch ?: launcherApps.firstOrNull {
+                    it.loadLabel(pm).toString().contains(nameOrPackage, ignoreCase = true)
+                }
+                
+                if (containsMatch != null) {
+                    intent = pm.getLaunchIntentForPackage(containsMatch.activityInfo.packageName)
+                    Log.i(TAG, "Found '${containsMatch.loadLabel(pm)}' (${containsMatch.activityInfo.packageName}) for query '$nameOrPackage'")
+                }
+            }
+
+            // Strategy 3: Fall back to getInstalledApplications (catches system apps not in launcher)
             if (intent == null) {
                 val packages = pm.getInstalledApplications(0)
-                for (appInfo in packages) {
-                    val label = pm.getApplicationLabel(appInfo).toString()
-                    if (label.equals(nameOrPackage, ignoreCase = true) ||
-                        label.contains(nameOrPackage, ignoreCase = true)) {
-                        intent = pm.getLaunchIntentForPackage(appInfo.packageName)
-                        break
-                    }
+                val match = packages.firstOrNull {
+                    pm.getApplicationLabel(it).toString().equals(nameOrPackage, ignoreCase = true)
+                } ?: packages.firstOrNull {
+                    pm.getApplicationLabel(it).toString().contains(nameOrPackage, ignoreCase = true)
+                }
+                if (match != null) {
+                    intent = pm.getLaunchIntentForPackage(match.packageName)
                 }
             }
 
@@ -464,6 +487,7 @@ class PhoneUseService : AccessibilityService() {
                 applicationContext.startActivity(intent)
                 true
             } else {
+                Log.w(TAG, "App not found: '$nameOrPackage'")
                 false
             }
         } catch (e: Exception) {
@@ -494,9 +518,12 @@ class PhoneUseService : AccessibilityService() {
      * All digits are tapped locally in one shot — no round-trips to server.
      */
     suspend fun unlockWithPin(pin: String): Boolean {
-        // Step 1: Dismiss lock screen
-        dismissLockScreen()
-        kotlinx.coroutines.delay(800)
+        // Step 1: Swipe up to show PIN pad
+        val metrics = resources.displayMetrics
+        val screenW = metrics.widthPixels
+        val screenH = metrics.heightPixels
+        swipe(screenW / 2f, screenH * 3f / 4f, screenW / 2f, screenH / 4f, 300)
+        kotlinx.coroutines.delay(1000)
 
         // Check if already unlocked
         if (!isSystemUI()) {
@@ -504,37 +531,104 @@ class PhoneUseService : AccessibilityService() {
             return true
         }
 
-        // Step 2: Find PIN pad layout by scanning UI tree for digit buttons
-        val digitLocations = findPinPadDigits()
-        if (digitLocations.isEmpty()) {
-            Log.w(TAG, "PIN pad not found, trying text-based fallback")
-            return unlockWithPinTextFallback(pin)
+        // Step 2: Try dismissLockScreen API (may bring up PIN entry on some ROMs)
+        dismissLockScreen()
+        kotlinx.coroutines.delay(500)
+        if (!isSystemUI()) {
+            Log.i(TAG, "Unlocked via dismissLockScreen")
+            return true
         }
 
-        // Step 3: Tap all digits rapidly (50ms between each)
+        // Step 3: Find PIN pad - try multiple strategies
+        var digitLocations = findPinPadDigits()
+        
+        if (digitLocations.size < 10) {
+            // Strategy 2: swipe up again and wait longer
+            Log.w(TAG, "Only found ${digitLocations.size} digits, retrying after swipe")
+            swipe(screenW / 2f, screenH * 3f / 4f, screenW / 2f, screenH / 4f, 200)
+            kotlinx.coroutines.delay(1500)
+            digitLocations = findPinPadDigits()
+        }
+
+        if (digitLocations.size < 10) {
+            // Strategy 3: Try grid-based fallback for ROMs without text labels
+            Log.w(TAG, "Still only ${digitLocations.size} digits, trying grid fallback")
+            return unlockWithPinGridFallback(pin, screenW, screenH)
+        }
+
+        // Step 4: Tap all digits rapidly (80ms between each for reliability)
         for (digit in pin) {
             val loc = digitLocations[digit] ?: run {
                 Log.w(TAG, "Digit '$digit' not found on PIN pad")
                 return false
             }
             tap(loc.first, loc.second)
-            kotlinx.coroutines.delay(50)  // Minimal delay between taps
+            kotlinx.coroutines.delay(80)
         }
 
-        // Step 4: Try confirm (many PIN pads auto-confirm)
-        kotlinx.coroutines.delay(300)
-        val confirmLoc = digitLocations['✓'] ?: digitLocations['E']
-        if (confirmLoc != null) {
-            tap(confirmLoc.first, confirmLoc.second)
-        } else {
-            // Try finding OK/Enter/确认 button
-            findAndClick("OK", 300) || findAndClick("确认", 300) || findAndClick("确定", 300)
-        }
-
+        // Step 5: Try confirm (many PIN pads auto-confirm after correct length)
         kotlinx.coroutines.delay(500)
+        if (isSystemUI()) {
+            val confirmLoc = digitLocations['✓'] ?: digitLocations['E']
+            if (confirmLoc != null) {
+                tap(confirmLoc.first, confirmLoc.second)
+            } else {
+                findAndClick("OK", 300) || findAndClick("确认", 300) || findAndClick("确定", 300)
+            }
+            kotlinx.coroutines.delay(500)
+        }
+
         val unlocked = !isSystemUI()
         Log.i(TAG, "Unlock result: $unlocked")
         return unlocked
+    }
+
+    /**
+     * Grid-based PIN entry fallback for ROMs where PIN buttons have no text labels.
+     * Standard Android PIN pad layout:
+     *   1 2 3
+     *   4 5 6
+     *   7 8 9
+     *   ⌫ 0 ✓
+     * PIN pad occupies roughly the bottom 40% of the screen.
+     */
+    private suspend fun unlockWithPinGridFallback(pin: String, screenW: Int, screenH: Int): Boolean {
+        val padTop = screenH * 0.55f
+        val padBottom = screenH * 0.95f
+        val padHeight = padBottom - padTop
+        val rowHeight = padHeight / 4f
+        val colWidth = screenW / 3f
+
+        val digitPositions = mapOf(
+            '1' to Pair(colWidth * 0.5f, padTop + rowHeight * 0.5f),
+            '2' to Pair(colWidth * 1.5f, padTop + rowHeight * 0.5f),
+            '3' to Pair(colWidth * 2.5f, padTop + rowHeight * 0.5f),
+            '4' to Pair(colWidth * 0.5f, padTop + rowHeight * 1.5f),
+            '5' to Pair(colWidth * 1.5f, padTop + rowHeight * 1.5f),
+            '6' to Pair(colWidth * 2.5f, padTop + rowHeight * 1.5f),
+            '7' to Pair(colWidth * 0.5f, padTop + rowHeight * 2.5f),
+            '8' to Pair(colWidth * 1.5f, padTop + rowHeight * 2.5f),
+            '9' to Pair(colWidth * 2.5f, padTop + rowHeight * 2.5f),
+            '0' to Pair(colWidth * 1.5f, padTop + rowHeight * 3.5f)
+        )
+
+        Log.i(TAG, "Using grid fallback for PIN entry (screen: ${screenW}x${screenH})")
+        for (digit in pin) {
+            val pos = digitPositions[digit] ?: continue
+            tap(pos.first, pos.second)
+            kotlinx.coroutines.delay(100)
+        }
+
+        kotlinx.coroutines.delay(800)
+        val unlocked = !isSystemUI()
+        if (!unlocked) {
+            // Try tapping confirm (bottom-right)
+            tap(colWidth * 2.5f, padTop + rowHeight * 3.5f)
+            kotlinx.coroutines.delay(500)
+        }
+        val result = !isSystemUI()
+        Log.i(TAG, "Grid fallback unlock result: $result")
+        return result
     }
 
     private fun isSystemUI(): Boolean {

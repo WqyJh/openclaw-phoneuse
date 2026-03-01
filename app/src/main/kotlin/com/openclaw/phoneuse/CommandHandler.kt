@@ -752,13 +752,7 @@ class CommandHandler {
                         errorResult("Failed to dismiss lock screen. Requires Android 9+ (API 28).")
                     }
                 } else {
-                    // PIN unlock — swipe up first to show PIN pad
-                    val displayMetrics = svc.resources.displayMetrics
-                    val screenW = displayMetrics.widthPixels
-                    val screenH = displayMetrics.heightPixels
-                    svc.swipe(screenW / 2f, screenH * 3f / 4f, screenW / 2f, screenH / 4f, 300)
-                    kotlinx.coroutines.delay(800)
-                    
+                    // PIN unlock (handles swipe + PIN entry internally)
                     val ok = svc.unlockWithPin(pin)
                     if (ok) {
                         successResult("unlock", true, "Unlocked with PIN")

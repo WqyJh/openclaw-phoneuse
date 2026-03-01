@@ -311,3 +311,207 @@ For Intent patterns and deep links, see [references/intents.md](references/inten
 - **`getForegroundApp`** is the fastest way to check which app is active (1 field vs full UI tree).
 - **Don't retry endlessly** — if an action fails twice, report failure and ask the user.
 - **`system.run` cannot launch Activities** — no shell permissions. Use `phoneUse.launch` or `phoneUse.startActivity`.
+
+## Best Practice Cases
+
+### Case 1: Search for a video on Bilibili
+
+**Task:** "在B站搜索凡人修仙传"
+
+```
+Step 1: getUITree {}
+  → package: com.android.systemui → locked!
+
+Step 2: phoneUse.unlock {pin: "654312"}
+  → "Unlocked with PIN"
+
+Step 3: getUITree {}
+  → package: com.miui.home → unlocked, on home screen ✅
+
+Step 4: phoneUse.openUrl {url: "bilibili://search?keyword=凡人修仙传"}
+  → Deep link directly to search results (fastest path!)
+
+Step 5: getUITree {}
+  → package: tv.danmaku.bili, search results visible ✅
+  → Done!
+```
+
+**Why this is optimal:**
+- Deep link skips: launch app → wait → find search → tap → type → submit
+- 5 steps instead of 10+
+- If `openUrl` is not available, fallback plan:
+
+```
+Step 4-alt: phoneUse.launch {package: "tv.danmaku.bili"}
+Step 5-alt: waitForElement {text: "搜索", timeout: 5000}
+Step 6-alt: getUITree {interactiveOnly: true}
+  → Find search entry field, note its coordinates
+  → VERIFY package is still tv.danmaku.bili before clicking!
+Step 7-alt: phoneUse.tap {x, y} on the search entry
+Step 8-alt: phoneUse.setText {text: "凡人修仙传"}
+Step 9-alt: phoneUse.inputKey {key: "enter"}
+Step 10-alt: getUITree {} → verify results
+```
+
+### Case 2: Send a WeChat message
+
+**Task:** "给张三发一条微信：明天下午3点开会"
+
+```
+Step 1: getUITree {}
+  → Determine current state
+
+Step 2: phoneUse.launch {package: "com.tencent.mm"}
+
+Step 3: waitForElement {text: "微信", timeout: 5000}
+
+Step 4: getUITree {interactiveOnly: true}
+  → Find search icon/entry at top
+
+Step 5: phoneUse.tap on search icon
+
+Step 6: phoneUse.setText {text: "张三"}
+
+Step 7: waitForElement {text: "张三", timeout: 3000}
+
+Step 8: getUITree {interactiveOnly: true}
+  → Find the contact entry, tap it
+
+Step 9: getUITree {interactiveOnly: true}
+  → Find message input field at bottom
+
+Step 10: phoneUse.tap on input field
+
+Step 11: phoneUse.setText {text: "明天下午3点开会"}
+
+Step 12: findAndClick {text: "发送"}
+
+Step 13: getUITree {}
+  → Verify message appears in chat ✅
+```
+
+### Case 3: Take and share a photo
+
+**Task:** "拍一张照片发给我"
+
+```
+Step 1: camera.snap {facing: "back"}
+  → Returns photo saved to server-side file
+
+Step 2: Done! Photo is already on the server, send to user directly.
+  → No need to open camera app on phone
+```
+
+**Note:** `camera.snap` uses the physical camera (Camera2 API), NOT a screenshot. The photo is transferred to the server automatically. For selfies use `facing: "front"`.
+
+### Case 4: Check and report phone status
+
+**Task:** "看看手机电量和存储"
+
+```
+Step 1: phoneUse.getDeviceStatus {}
+  → Returns: battery level, WiFi status, storage info, screen state
+
+Step 2: Report to user.
+```
+
+**1 command, no UI interaction needed.**
+
+### Case 5: Install and open a new app
+
+**Task:** "帮我打开小红书"
+
+```
+Step 1: phoneUse.listApps {}
+  → Search results for "小红书" or "com.xingin.xhs"
+  → If found: note package name
+
+Step 2: phoneUse.launch {package: "com.xingin.xhs"}
+
+Step 3: getUITree {}
+  → Verify app loaded
+
+If NOT found in listApps:
+  → Tell user: "小红书未安装，需要先从应用商店下载"
+  → phoneUse.openUrl {url: "market://details?id=com.xingin.xhs"} to open store
+```
+
+### Case 6: Navigate system settings
+
+**Task:** "帮我打开WiFi设置"
+
+```
+Step 1: phoneUse.startActivity {action: "android.settings.WIFI_SETTINGS"}
+  → Directly opens WiFi settings page
+
+Step 2: getUITree {}
+  → Verify we're in settings ✅
+```
+
+**Don't manually navigate Settings → WiFi. Use Intent actions for direct access.**
+
+### Case 7: Copy text from screen
+
+**Task:** "帮我复制屏幕上的验证码"
+
+```
+Step 1: getUITree {}
+  → Find the text element containing the verification code
+
+Step 2: If code is visible in UI tree text:
+  → Extract it directly, done!
+
+Step 3: If code is in an image (not in UI tree):
+  → phoneUse.screenshot {}
+  → Analyze image to read the code
+  → phoneUse.clipboard {set: "123456"}
+```
+
+### Case 8: Multi-step form with scrolling
+
+**Task:** "帮我填写注册表单"
+
+```
+Step 1: getUITree {interactiveOnly: true}
+  → Map all visible input fields
+
+Step 2: For each field:
+  → tap field → setText → verify
+
+Step 3: If more fields below:
+  → scrollDown {}
+  → getUITree {interactiveOnly: true}
+  → Continue filling
+
+Step 4: findAndClick {text: "提交"} or {text: "注册"}
+
+Step 5: getUITree {}
+  → Verify success page / error message
+```
+
+**Key rules for forms:**
+- Fill fields top-to-bottom
+- After scrolling, re-read UI tree (coordinates change!)
+- Check for error messages after submit
+
+## Error Recovery
+
+When things go wrong, follow this decision tree:
+
+```
+Action failed?
+├── Check getUITree → Did a dialog/popup appear?
+│   └── Yes → Dismiss it (back, or tap close button)
+├── Wrong app? (package mismatch)
+│   └── phoneUse.back {} (1-3 times to return)
+├── Screen off?
+│   └── phoneUse.wakeScreen {} → getUITree {}
+├── Locked?
+│   └── phoneUse.unlock {pin}
+├── App crashed?
+│   └── phoneUse.launch {package: "..."} (relaunch)
+└── Failed twice?
+    └── STOP. Report to user. Do not loop.
+```
+
+**Never retry more than 2 times.** Infinite retry loops waste tokens and time.

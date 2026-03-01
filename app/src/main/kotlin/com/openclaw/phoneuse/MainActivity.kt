@@ -109,7 +109,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Version display
-        binding.versionText.text = "v30 • ${Build.MODEL}"
+        binding.versionText.text = "v31 • ${Build.MODEL}"
 
         // Device ID display
         try {
@@ -157,7 +157,7 @@ class MainActivity : AppCompatActivity() {
             sb.appendLine("===== OpenClaw PhoneUse Business Log =====")
             sb.appendLine("Time: ${dateFormat.format(java.util.Date())}")
             sb.appendLine("Device: ${Build.MODEL} (${Build.MANUFACTURER})")
-            sb.appendLine("Version: 2.0.0-v30")
+            sb.appendLine("Version: 2.0.0-v31")
             sb.appendLine("Accessibility: ${PhoneUseService.instance != null}")
             sb.appendLine("Gateway: ${GatewayForegroundService.gatewayClient != null}")
             sb.appendLine()
@@ -174,7 +174,7 @@ class MainActivity : AppCompatActivity() {
                 sb.appendLine("Time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}")
                 sb.appendLine("Device: ${Build.MODEL} (${Build.MANUFACTURER})")
                 sb.appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-                sb.appendLine("Version: 2.0.0-v30")
+                sb.appendLine("Version: 2.0.0-v31")
                 sb.appendLine()
                 sb.appendLine("=== State ===")
                 sb.appendLine("Accessibility: ${PhoneUseService.instance != null}")

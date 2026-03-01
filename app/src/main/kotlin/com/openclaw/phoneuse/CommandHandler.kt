@@ -707,11 +707,23 @@ class CommandHandler {
 
             "phoneUse.unlock" -> {
                 val pin = params.optString("pin", "")
-                // Wake screen first
-                GatewayForegroundService.keepAlive?.wakeScreenTemporarily()
-                kotlinx.coroutines.delay(500)
                 
-                if (pin.isEmpty()) {
+                // Wake screen and hold it on for the entire unlock process
+                GatewayForegroundService.keepAlive?.wakeScreenTemporarily()
+                // Wait for screen to fully wake up
+                var screenReady = false
+                for (attempt in 1..10) {
+                    kotlinx.coroutines.delay(300)
+                    if (GatewayForegroundService.keepAlive?.isScreenOn() == true) {
+                        screenReady = true
+                        break
+                    }
+                    // Re-acquire wake lock if needed
+                    GatewayForegroundService.keepAlive?.wakeScreenTemporarily()
+                }
+                if (!screenReady) {
+                    errorResult("Failed to wake screen after 3 seconds")
+                } else if (pin.isEmpty()) {
                     // No PIN — just dismiss lock screen (swipe/none lock)
                     val ok = svc.dismissLockScreen()
                     if (ok) {
@@ -721,7 +733,13 @@ class CommandHandler {
                         errorResult("Failed to dismiss lock screen. Requires Android 9+ (API 28).")
                     }
                 } else {
-                    // PIN unlock
+                    // PIN unlock — swipe up first to show PIN pad
+                    val displayMetrics = svc.resources.displayMetrics
+                    val screenW = displayMetrics.widthPixels
+                    val screenH = displayMetrics.heightPixels
+                    svc.swipe(screenW / 2f, screenH * 3f / 4f, screenW / 2f, screenH / 4f, 300)
+                    kotlinx.coroutines.delay(800)
+                    
                     val ok = svc.unlockWithPin(pin)
                     if (ok) {
                         successResult("unlock", true, "Unlocked with PIN")

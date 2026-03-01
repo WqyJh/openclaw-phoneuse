@@ -57,19 +57,38 @@ class CommandHandler {
             // ========== Standard OpenClaw node commands ==========
             
             "camera.snap" -> {
-                // Standard screenshot matching Gateway's expected format:
-                // {format, base64, width, height}
-                val maxWidth = params.optInt("maxWidth", 720)
-                val quality = params.optInt("quality", 60)
-                captureForGateway(svc, maxWidth, quality)
+                // Real camera capture via Camera2 API
+                val facing = params.optString("facing", "back")
+                val maxWidth = params.optInt("maxWidth", 1600)
+                val quality = (params.optDouble("quality", 0.85) * 100).toInt().coerceIn(1, 100)
+                
+                val camera = CameraCapture(svc.applicationContext)
+                val result = camera.capture(facing, maxWidth, quality)
+                
+                if (result != null) {
+                    JSONObject()
+                        .put("format", "jpg")
+                        .put("base64", result.base64)
+                        .put("width", result.width)
+                        .put("height", result.height)
+                        .put("facing", result.facing)
+                } else {
+                    errorResult("Camera capture failed. Check CAMERA permission is granted.")
+                }
             }
 
             "camera.list" -> {
-                JSONObject()
-                    .put("ok", true)
-                    .put("cameras", org.json.JSONArray()
-                        .put(JSONObject().put("id", "screen").put("name", "Screen").put("facing", "front"))
+                val camera = CameraCapture(svc.applicationContext)
+                val cameras = camera.listCameras()
+                val arr = org.json.JSONArray()
+                cameras.forEach { cam ->
+                    arr.put(JSONObject()
+                        .put("id", cam["id"])
+                        .put("name", "${cam["facing"]?.replaceFirstChar { it.uppercase() }} Camera")
+                        .put("facing", cam["facing"])
                     )
+                }
+                JSONObject().put("ok", true).put("cameras", arr)
             }
 
             "camera.clip" -> {

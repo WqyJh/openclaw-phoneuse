@@ -45,7 +45,7 @@ For screenshots and recordings, use `nodes` tool **actions** (camera_snap, scree
 
 | Method | Context cost | Use when |
 |--------|-------------|----------|
-| `nodes camera_snap` (action) | ✅ File path only | Default for screenshots |
+| `nodes camera_snap` (action) | ✅ File path only | Camera photo (front/back) |
 | `nodes screen_record` (action) | ✅ File path only | Default for recordings |
 | `nodes invoke phoneUse.screenshot` | ⚠️ base64 in payload | Custom params needed |
 
@@ -61,18 +61,20 @@ openclaw config set gateway.nodes.allowCommands '["phoneUse.tap","phoneUse.doubl
 
 This only needs to be done once per Gateway.
 
-## Core Workflow: See → Think → Act
+## Core Workflow: Sense → Think → Act → Verify
 
 Every phone interaction follows this loop:
 
 ```
-1. Screenshot  →  see the current screen
-2. Analyze     →  understand what's visible, find targets
-3. Act         →  tap/swipe/type based on what you see
-4. Verify      →  screenshot again to confirm the action worked
+1. getUITree    →  understand current screen (package, elements, coordinates)
+2. Think        →  decide action based on UI tree
+3. Act          →  tap/swipe/type based on UI tree data
+4. getUITree    →  verify the action worked (check package changed, element appeared)
 ```
 
-**Never act blindly.** Always screenshot first to see the current state.
+**UI Tree first, always.** `getUITree` is cheap (~5KB text), tells you the current app (package), all elements, and their coordinates. Only use `screenshot` when you need to see visual content that isn't in the UI tree (images, videos, layout verification).
+
+**Never screenshot as the first step.** Screenshot is expensive (~100KB), may be black on lock screen, and UI tree gives you more actionable data (exact coordinates, element IDs, text content).
 
 ## Invoking Commands
 
@@ -145,26 +147,33 @@ Launches by display name or package name.
 - `phoneUse.back` — back button
 - `phoneUse.home` — home button
 
-## Screen Management
+## Screen Management & Unlock
 
-### If the screen is off
+### Step-by-step unlock flow (follow this exactly):
 
-```json
-{"invokeCommand": "phoneUse.wakeScreen", "invokeParamsJson": "{}"}
+```
+1. getUITree {}
+   → Check the "package" field in response:
+     - "com.android.systemui" = lock screen
+     - anything else = already unlocked, skip to your task
+
+2. If locked and you have a PIN:
+   phoneUse.unlock {pin: "1234"}
+   → This command handles everything: wake screen, swipe up, enter PIN
+
+3. Verify unlock:
+   getUITree {}
+   → package should NOT be "com.android.systemui"
+   → If still locked, try unlock one more time
+
+4. If unlock fails twice: report failure, do NOT keep retrying
 ```
 
-### If the phone is locked
-
-```json
-{"invokeCommand": "phoneUse.unlock", "invokeParamsJson": "{\"pin\": \"1234\"}"}
-```
-Omit `pin` for swipe/no-lock screens. The command wakes the screen, dismisses the lock, and enters the PIN automatically.
-
-### Check screen state
-
-```json
-{"invokeCommand": "phoneUse.isScreenOn", "invokeParamsJson": "{}"}
-```
+**Important:**
+- **Never screenshot on lock screen** — Android security blocks it, you'll get a black image
+- **Use getUITree to check lock state** — look at `package` field
+- `phoneUse.unlock` already calls `wakeScreen` internally — don't call it separately
+- Omit `pin` for swipe/no-lock screens
 
 ## File Operations
 
@@ -178,38 +187,70 @@ Read, write, and browse files on the phone. Paths are typically under `/sdcard/`
 
 For large files, use chunked transfer. See [references/file-transfer.md](references/file-transfer.md).
 
+## Navigation Rules (MUST follow)
+
+1. **Always use package name for launch** — never display names like "哔哩哔哩"
+   - ✅ `phoneUse.launch {package: "tv.danmaku.bili"}`
+   - ❌ `phoneUse.launch {app: "哔哩哔哩"}`
+   - If package unknown → `phoneUse.listApps {}` first
+
+2. **Don't press Home as recovery** — use `back` to stay in context
+   - Already in B站? Stay there, navigate from within
+   - Pressing Home loses all app state
+
+3. **Verify after every critical action** — `getUITree` to confirm
+   - Check `package` field to confirm which app you're in
+   - Don't assume an action worked
+
+4. **Use deep links when available** — `openUrl("bilibili://search?keyword=xxx")` beats manual UI navigation
+
+5. **Check context before acting** — `getUITree` first to see where you are
+   - Text "搜索" exists on home screen AND in apps — wrong one = wrong app
+   - Always confirm package before clicking
+
 ## Common Patterns
 
-### Pattern: Open app and navigate to a screen
+### Pattern: Open app and navigate
 
 ```
-1. phoneUse.launch {app: "WeChat"}
-2. phoneUse.waitForElement {text: "Chats"}  — wait for app to load
-3. phoneUse.screenshot {}  — see current state
-4. phoneUse.findAndClick {text: "Contacts"}  — navigate
-5. phoneUse.screenshot {}  — verify
+1. getUITree {}                                    — where am I?
+2. phoneUse.launch {package: "tv.danmaku.bili"}    — always use package name
+3. waitForElement {text: "首页", timeout: 5000}     — wait for app to load
+4. getUITree {interactiveOnly: true}               — find navigation targets
+5. findAndClick {text: "搜索"}                      — navigate
+6. getUITree {}                                     — verify (check package!)
 ```
 
 ### Pattern: Fill a form
 
 ```
-1. phoneUse.screenshot {}  — see the form
-2. phoneUse.getUITree {interactiveOnly: true}  — find input fields
-3. phoneUse.tap {x, y}  — tap first field
-4. phoneUse.setText {text: "value"}  — enter text
-5. phoneUse.tap {x, y}  — tap next field
-6. phoneUse.setText {text: "value"}
-7. phoneUse.findAndClick {text: "Submit"}
-8. phoneUse.screenshot {}  — verify submission
+1. getUITree {interactiveOnly: true}   — find all input fields + coordinates
+2. phoneUse.tap {x, y}                — tap first field
+3. phoneUse.setText {text: "value"}    — enter text
+4. phoneUse.tap {x, y}                — next field
+5. phoneUse.setText {text: "value"}
+6. findAndClick {text: "Submit"}
+7. getUITree {}                         — verify submission result
 ```
 
 ### Pattern: Scroll to find content
 
 ```
-1. phoneUse.screenshot {}
-2. If target not visible: phoneUse.scrollDown {}
-3. phoneUse.screenshot {}  — check again
-4. Repeat until found or bottom reached
+1. getUITree {}                  — check visible elements
+2. If target not found: scrollDown {}
+3. getUITree {}                  — check again
+4. Repeat until found or 5 scrolls max
+```
+
+### Pattern: Unlock → Open app → Do task
+
+```
+1. getUITree {}                        — check if locked (package = com.android.systemui?)
+2. phoneUse.unlock {pin: "1234"}       — only if locked
+3. getUITree {}                        — verify unlocked
+4. phoneUse.launch {package: "..."}    — open target app
+5. getUITree {}                        — verify app loaded
+6. ... continue with task
 ```
 
 ## App & System Info
@@ -262,9 +303,11 @@ For Intent patterns and deep links, see [references/intents.md](references/inten
 
 ## Tips
 
-- **Prefer `findAndClick` over coordinate tapping** when button text is known — it's more reliable across screen sizes.
-- **Use `getUITree` with `interactiveOnly: true`** to discover exact element coordinates instead of guessing.
-- **Always verify** actions with a screenshot after performing them.
-- **Wait for loading**: Use `phoneUse.waitForElement` after launching apps or navigating.
-- **Screen coordinates** are in pixels. Use `phoneUse.getScreenInfo` to get screen dimensions if needed.
-- Commands that need the screen (tap, screenshot) **auto-wake** the display — no need to call `wakeScreen` first in most cases.
+- **getUITree is your eyes** — use it before and after every action. It's cheap (~5KB).
+- **Screenshot only for visual content** — photos, videos, layouts. Never as the default "see" step.
+- **Never screenshot on lock screen** — it returns black. Use getUITree to check lock state.
+- **Prefer `findAndClick` over coordinate tapping** when button text is known.
+- **Wait for loading**: Use `phoneUse.waitForElement` after launching apps.
+- **`getForegroundApp`** is the fastest way to check which app is active (1 field vs full UI tree).
+- **Don't retry endlessly** — if an action fails twice, report failure and ask the user.
+- **`system.run` cannot launch Activities** — no shell permissions. Use `phoneUse.launch` or `phoneUse.startActivity`.

@@ -14,6 +14,19 @@ class CommandHandler {
 
     companion object {
         private const val TAG = "CommandHandler"
+
+        /**
+         * Save binary data to a file in cache dir, return the absolute path.
+         * Files are organized: cache/phoneuse/{type}/filename
+         */
+        fun saveToFile(context: android.content.Context, data: ByteArray, type: String, ext: String): String {
+            val dir = java.io.File(context.cacheDir, "phoneuse/$type")
+            dir.mkdirs()
+            val filename = "${type}_${System.currentTimeMillis()}.$ext"
+            val file = java.io.File(dir, filename)
+            file.writeBytes(data)
+            return file.absolutePath
+        }
     }
 
     private val service: PhoneUseService?
@@ -76,17 +89,12 @@ class CommandHandler {
                     return captureForGateway(svc, maxWidth, 60)
                 }
 
-                val response = JSONObject()
+                JSONObject()
+                    .put("ok", true)
+                    .put("path", result.filePath)
                     .put("format", result.format)
                     .put("durationMs", result.durationMs)
                     .put("sizeBytes", result.sizeBytes)
-                if (result.sizeBytes <= 10 * 1024 * 1024) {
-                    try {
-                        val bytes = java.io.File(result.filePath).readBytes()
-                        response.put("base64", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
-                    } catch (_: Exception) {}
-                }
-                response
             }
 
             "screen.record" -> {
@@ -113,26 +121,16 @@ class CommandHandler {
                     return errorResult("Screen recording failed. Check logcat for details.")
                 }
 
-                val response = JSONObject()
+                // Return path only — no base64 in context
+                JSONObject()
+                    .put("ok", true)
+                    .put("path", result.filePath)
                     .put("format", result.format)
                     .put("durationMs", result.durationMs)
                     .put("width", result.width)
                     .put("height", result.height)
                     .put("sizeBytes", result.sizeBytes)
-                    .put("recordingId", result.filePath)  // For file.read if needed
-
-                // Inline base64 if small enough
-                if (result.sizeBytes <= inlineThreshold) {
-                    try {
-                        val bytes = java.io.File(result.filePath).readBytes()
-                        val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                        response.put("base64", base64)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to read recording file: ${e.message}")
-                    }
-                }
-
-                response
+                    .put("message", "Recording saved: ${result.durationMs}ms ${result.sizeBytes / 1024}KB")
             }
 
             "location.get" -> {
@@ -303,7 +301,8 @@ class CommandHandler {
             "phoneUse.screenshot" -> {
                 val quality = params.optInt("quality", 60)
                 val maxWidth = params.optInt("maxWidth", 720)
-                captureForGateway(svc, maxWidth, quality)
+                // Save to file, return path only (no base64 in context)
+                captureToFile(svc, maxWidth, quality)
             }
 
             "phoneUse.requestScreenCapture" -> {
@@ -773,18 +772,23 @@ class CommandHandler {
     }
 
     /**
-     * Capture screenshot in Gateway's expected format: {format, base64, width, height}
+     * Capture screenshot, save to file, return path (no base64 in response).
+     * Gateway-compatible: also includes format, width, height for parseCameraSnapPayload.
      */
     private suspend fun captureForGateway(svc: PhoneUseService, maxWidth: Int = 720, quality: Int = 60): JSONObject {
         return suspendCancellableCoroutine { cont ->
             svc.takeScreenshotBase64(maxWidth, quality) { data ->
                 if (data != null) {
-                    // Gateway parseCameraSnapPayload expects: format, base64, width, height
+                    val bytes = android.util.Base64.decode(data.base64, android.util.Base64.NO_WRAP)
+                    val path = saveToFile(svc.applicationContext, bytes, "screenshot", "jpg")
+                    // Include base64 for Gateway compatibility (parseCameraSnapPayload needs it)
                     cont.resume(JSONObject()
                         .put("format", "jpg")
                         .put("base64", data.base64)
                         .put("width", data.width)
-                        .put("height", data.height))
+                        .put("height", data.height)
+                        .put("path", path)
+                        .put("sizeBytes", bytes.size))
                 } else {
                     cont.resume(errorResult("Screenshot failed. Ensure Accessibility Service is enabled."))
                 }
@@ -859,6 +863,31 @@ class CommandHandler {
             .put("fps", frames.size * 1000 / actualDuration.coerceAtLeast(1))
             .put("frameCount", frames.size)
             .put("sizeBytes", output.size())
+    }
+
+    /**
+     * Capture screenshot, save to file, return path only (no base64).
+     * For phoneUse.screenshot — avoids polluting agent context with image data.
+     */
+    private suspend fun captureToFile(svc: PhoneUseService, maxWidth: Int = 720, quality: Int = 60): JSONObject {
+        return suspendCancellableCoroutine { cont ->
+            svc.takeScreenshotBase64(maxWidth, quality) { data ->
+                if (data != null) {
+                    val bytes = android.util.Base64.decode(data.base64, android.util.Base64.NO_WRAP)
+                    val path = saveToFile(svc.applicationContext, bytes, "screenshot", "jpg")
+                    cont.resume(JSONObject()
+                        .put("ok", true)
+                        .put("path", path)
+                        .put("format", "jpg")
+                        .put("width", data.width)
+                        .put("height", data.height)
+                        .put("sizeBytes", bytes.size)
+                        .put("message", "Screenshot saved: ${data.width}x${data.height} (${bytes.size / 1024}KB)"))
+                } else {
+                    cont.resume(errorResult("Screenshot failed. Ensure Accessibility Service is enabled."))
+                }
+            }
+        }
     }
 
     private suspend fun captureAccessibility(svc: PhoneUseService, maxWidth: Int = 720, quality: Int = 60): JSONObject {

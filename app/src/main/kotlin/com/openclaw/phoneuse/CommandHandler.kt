@@ -526,6 +526,171 @@ class CommandHandler {
                 successResult("file.delete", deleted, if (deleted) "Deleted: $path" else "Not found: $path")
             }
 
+            // ========== System Info & Apps ==========
+
+            "phoneUse.listApps" -> {
+                val pm = svc.applicationContext.packageManager
+                val includeSystem = params.optBoolean("includeSystem", false)
+                val intent = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
+                    addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+                }
+                val apps = pm.queryIntentActivities(intent, 0)
+                    .filter { includeSystem || (it.activityInfo.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0 }
+                    .sortedBy { it.loadLabel(pm).toString().lowercase() }
+                    .map { ri ->
+                        JSONObject()
+                            .put("name", ri.loadLabel(pm).toString())
+                            .put("package", ri.activityInfo.packageName)
+                    }
+                JSONObject()
+                    .put("ok", true)
+                    .put("count", apps.size)
+                    .put("apps", org.json.JSONArray(apps))
+            }
+
+            "phoneUse.getForegroundApp" -> {
+                val root = svc.rootInActiveWindow
+                val pkg = root?.packageName?.toString() ?: "unknown"
+                root?.recycle()
+                JSONObject()
+                    .put("ok", true)
+                    .put("package", pkg)
+            }
+
+            "phoneUse.openUrl" -> {
+                val url = params.optString("url", "")
+                if (url.isEmpty()) return errorResult("Missing url")
+                try {
+                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    svc.applicationContext.startActivity(intent)
+                    successResult("openUrl", true, "Opened: $url")
+                } catch (e: Exception) {
+                    errorResult("openUrl failed: ${e.message}")
+                }
+            }
+
+            "phoneUse.startActivity" -> {
+                val action = params.optString("action", "")
+                val uri = params.optString("uri", "")
+                val pkg = params.optString("package", "")
+                val className = params.optString("class", "")
+                try {
+                    val intent = android.content.Intent().apply {
+                        if (action.isNotEmpty()) setAction(action)
+                        if (uri.isNotEmpty()) data = android.net.Uri.parse(uri)
+                        if (pkg.isNotEmpty()) setPackage(pkg)
+                        if (pkg.isNotEmpty() && className.isNotEmpty()) setClassName(pkg, className)
+                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    svc.applicationContext.startActivity(intent)
+                    successResult("startActivity", true, "Started: action=$action uri=$uri pkg=$pkg")
+                } catch (e: Exception) {
+                    errorResult("startActivity failed: ${e.message}")
+                }
+            }
+
+            "phoneUse.clipboard" -> {
+                val cm = svc.applicationContext.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val setText = params.optString("set", "")
+                if (setText.isNotEmpty()) {
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("text", setText))
+                    JSONObject().put("ok", true).put("action", "set").put("text", setText)
+                } else {
+                    val clip = cm.primaryClip
+                    val text = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).text?.toString() ?: "" else ""
+                    JSONObject().put("ok", true).put("action", "get").put("text", text)
+                }
+            }
+
+            "phoneUse.getDeviceStatus" -> {
+                val ctx = svc.applicationContext
+                val bm = ctx.getSystemService(android.content.Context.BATTERY_SERVICE) as android.os.BatteryManager
+                val batteryLevel = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                val isCharging = bm.isCharging
+                
+                val wm = ctx.getSystemService(android.content.Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+                val wifiEnabled = wm?.isWifiEnabled ?: false
+                @Suppress("DEPRECATION")
+                val wifiName = try { wm?.connectionInfo?.ssid?.replace("\"", "") ?: "" } catch (_: Exception) { "" }
+                
+                val stat = android.os.StatFs(android.os.Environment.getExternalStorageDirectory().path)
+                val freeGB = stat.availableBytes / (1024 * 1024 * 1024)
+                val totalGB = stat.totalBytes / (1024 * 1024 * 1024)
+
+                JSONObject()
+                    .put("ok", true)
+                    .put("battery", batteryLevel)
+                    .put("isCharging", isCharging)
+                    .put("wifiEnabled", wifiEnabled)
+                    .put("wifiName", wifiName)
+                    .put("storageFreeGB", freeGB)
+                    .put("storageTotalGB", totalGB)
+                    .put("screenOn", GatewayForegroundService.keepAlive?.isScreenOn() ?: false)
+                    .put("model", android.os.Build.MODEL)
+                    .put("androidVersion", android.os.Build.VERSION.RELEASE)
+                    .put("apiLevel", android.os.Build.VERSION.SDK_INT)
+            }
+
+            "phoneUse.openAllApps" -> {
+                // GLOBAL_ACTION_ALL_APPS = 14, API 31+
+                val ok = if (android.os.Build.VERSION.SDK_INT >= 31) {
+                    svc.performGlobalAction(14)
+                } else {
+                    false
+                }
+                if (ok) {
+                    successResult("openAllApps", true, "App drawer opened")
+                } else {
+                    errorResult("openAllApps requires Android 12+ (API 31)")
+                }
+            }
+
+            "phoneUse.queryIntents" -> {
+                val action = params.optString("action", "")
+                val category = params.optString("category", "")
+                val pkg = params.optString("package", "")
+                val pm = svc.applicationContext.packageManager
+                
+                if (pkg.isNotEmpty()) {
+                    // List exported activities for a package
+                    try {
+                        @Suppress("DEPRECATION")
+                        val pkgInfo = pm.getPackageInfo(pkg, android.content.pm.PackageManager.GET_ACTIVITIES)
+                        val activities = pkgInfo.activities?.filter { it.exported }?.map { ai ->
+                            JSONObject()
+                                .put("name", ai.name)
+                                .put("label", try { ai.loadLabel(pm).toString() } catch (_: Exception) { ai.name })
+                                .put("exported", ai.exported)
+                        } ?: emptyList()
+                        JSONObject()
+                            .put("ok", true)
+                            .put("package", pkg)
+                            .put("count", activities.size)
+                            .put("activities", org.json.JSONArray(activities))
+                    } catch (e: Exception) {
+                        errorResult("Package not found: $pkg")
+                    }
+                } else if (action.isNotEmpty()) {
+                    val intent = android.content.Intent(action)
+                    if (category.isNotEmpty()) intent.addCategory(category)
+                    val results = pm.queryIntentActivities(intent, 0).take(50).map { ri ->
+                        JSONObject()
+                            .put("package", ri.activityInfo.packageName)
+                            .put("activity", ri.activityInfo.name)
+                            .put("label", ri.loadLabel(pm).toString())
+                    }
+                    JSONObject()
+                        .put("ok", true)
+                        .put("action", action)
+                        .put("count", results.size)
+                        .put("results", org.json.JSONArray(results))
+                } else {
+                    errorResult("Provide 'action' or 'package' parameter")
+                }
+            }
+
             // ========== Screen Lock ==========
 
             "phoneUse.unlock" -> {

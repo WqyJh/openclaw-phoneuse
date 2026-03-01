@@ -162,6 +162,54 @@ For large files, use chunked transfer. See [references/file-transfer.md](referen
 4. Repeat until found or bottom reached
 ```
 
+## App & System Info
+
+### List installed apps
+
+```json
+{"invokeCommand": "phoneUse.listApps", "invokeParamsJson": "{}"}
+```
+Returns app names and package names. Use package name with `phoneUse.launch`.
+
+### Get current foreground app
+
+```json
+{"invokeCommand": "phoneUse.getForegroundApp", "invokeParamsJson": "{}"}
+```
+
+### Device status (battery, WiFi, storage)
+
+```json
+{"invokeCommand": "phoneUse.getDeviceStatus", "invokeParamsJson": "{}"}
+```
+
+### Clipboard
+
+```json
+{"invokeCommand": "phoneUse.clipboard", "invokeParamsJson": "{}"}
+{"invokeCommand": "phoneUse.clipboard", "invokeParamsJson": "{\"set\": \"copied text\"}"}
+```
+
+### Open URL or deep link
+
+```json
+{"invokeCommand": "phoneUse.openUrl", "invokeParamsJson": "{\"url\": \"https://bilibili.com\"}"}
+```
+
+### Open system settings or send Intent
+
+```json
+{"invokeCommand": "phoneUse.startActivity", "invokeParamsJson": "{\"action\": \"android.settings.WIFI_SETTINGS\"}"}
+```
+
+For Intent patterns and deep links, see [references/intents.md](references/intents.md).
+
+### Discover app capabilities
+
+```json
+{"invokeCommand": "phoneUse.queryIntents", "invokeParamsJson": "{\"package\": \"tv.danmaku.bili\"}"}
+```
+
 ## Tips
 
 - **Prefer `findAndClick` over coordinate tapping** when button text is known — it's more reliable across screen sizes.

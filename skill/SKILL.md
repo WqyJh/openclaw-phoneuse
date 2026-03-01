@@ -14,6 +14,35 @@ description: |
 
 Control a connected Android phone via the `nodes` tool with `action: invoke`.
 
+## Context Cost Management
+
+**Screenshots and recordings are expensive in context.** Follow these rules:
+
+### Rule 1: Use a sub-agent for PhoneUse tasks
+
+Spawn an isolated sub-agent with `sessions_spawn(mode: "run")` for phone operations. This keeps screenshots/UI trees out of the main conversation context.
+
+```
+Main agent receives: "帮我打开B站看看热门视频"
+→ sessions_spawn({task: "Use phoneUse on node <nodeId> to open Bilibili and report the top 3 trending videos", mode: "run"})
+→ Sub-agent executes all phoneUse commands internally (screenshots stay in sub-agent context)
+→ Sub-agent returns text result: "已打开B站，热门Top3: 1. xxx 2. xxx 3. xxx"
+→ Sub-agent exits immediately after completing the task
+```
+
+The sub-agent MUST exit after completing its task — do not keep it running.
+
+### Rule 2: Minimize screenshots
+
+- **Prefer `getUITree`** (~5KB text) over `screenshot` (~100KB image) when you need to find elements
+- Only screenshot to **verify visual state** or when UI tree alone is insufficient
+- Use lower quality when possible: `{maxWidth: 480, quality: 30}` → ~20KB
+- **Never reference raw base64** in your responses — describe what you see in words
+
+### Rule 3: Clean up recordings
+
+After downloading a screen recording via `file.read`, delete it with `file.delete` to free storage.
+
 ## Before You Start
 
 1. Check node is connected: `nodes describe` — look for a node with `phoneUse` in caps

@@ -53,6 +53,13 @@ For screenshots and recordings, use `nodes` tool **actions** (camera_snap, scree
 
 1. Check node is connected: `nodes describe` — look for a node with `phoneUse` in caps
 2. Note the `nodeId` — you'll need it for every invoke call
+3. Ensure Gateway allows phoneUse commands. Run once:
+
+```bash
+openclaw config set gateway.nodes.allowCommands '["phoneUse.tap","phoneUse.doubleTap","phoneUse.longTap","phoneUse.swipe","phoneUse.pinch","phoneUse.setText","phoneUse.typeText","phoneUse.findAndClick","phoneUse.screenshot","phoneUse.getUITree","phoneUse.getScreenInfo","phoneUse.launch","phoneUse.back","phoneUse.home","phoneUse.recents","phoneUse.openNotifications","phoneUse.openQuickSettings","phoneUse.scrollDown","phoneUse.scrollUp","phoneUse.scrollLeft","phoneUse.scrollRight","phoneUse.waitForElement","phoneUse.inputKey","phoneUse.requestScreenCapture","phoneUse.unlock","phoneUse.lockScreen","phoneUse.wakeScreen","phoneUse.isScreenOn","phoneUse.listApps","phoneUse.getForegroundApp","phoneUse.openUrl","phoneUse.startActivity","phoneUse.clipboard","phoneUse.getDeviceStatus","phoneUse.openAllApps","phoneUse.queryIntents","camera.snap","camera.clip","screen.record","system.run","system.notify","file.read","file.write","file.info","file.list","file.delete"]'
+```
+
+This only needs to be done once per Gateway.
 
 ## Core Workflow: See → Think → Act
 

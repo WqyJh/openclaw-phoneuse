@@ -9,26 +9,31 @@
   <a href="#architecture">Architecture</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#commands">Commands</a> •
+  <a href="#connection-methods">Connection</a> •
   <a href="#gateway-setup">Gateway Setup</a> •
   <a href="#building">Building</a>
 </p>
 
 ---
 
-An Android app that connects to an [OpenClaw](https://github.com/openclaw/openclaw) Gateway as a **node**, enabling AI agents to remotely control your phone — tap, swipe, type, take screenshots, launch apps, and more.
+An Android app that connects to an [OpenClaw](https://github.com/openclaw/openclaw) Gateway as a **node**, enabling AI agents to remotely control your phone — tap, swipe, type, take screenshots, record screen, read/write files, and more.
 
 ## Features
 
-- 📱 **Full UI Automation** — Tap, swipe, scroll, type text, find & click elements by text
-- 📸 **Screenshot Capture** — Compressed JPEG via Accessibility API (720p, ~100KB)
-- 🌐 **Tailscale Support** — Connect securely over Tailscale Serve (WSS/HTTPS)
-- 🔐 **Ed25519 Auth** — Cryptographic device identity with Gateway challenge-response
-- 🔄 **Auto Reconnect** — Exponential backoff (2s → 60s max), reset on manual connect
+- 📱 **Full UI Automation** — Tap, swipe, scroll, type text, find & click elements
+- 📸 **Screenshot** — Compressed JPEG via Accessibility API (720p, ~100KB)
+- 🎬 **Screen Recording** — Real H.264 MP4 via MediaProjection + MediaRecorder
+- 📁 **File Operations** — Read/write/list any file on the device (`/sdcard/` etc.)
+- 🔓 **Screen Unlock** — Dismiss lock screen, auto-enter PIN
+- 🌐 **Tailscale / Caddy / LAN** — Multiple secure connection methods
+- 🔐 **Ed25519 Auth** — Cryptographic device identity with challenge-response
+- 🔄 **Auto Reconnect** — Exponential backoff, auto-connect on launch
+- 💤 **Background Keep-Alive** — Works with screen off, wakes on command
 - 📍 **Device Sensors** — GPS location, notification listing
-- 🔔 **Push Notifications** — Remote notification delivery to device
+- 🔔 **Push Notifications** — Remote notification delivery
 - 🐚 **Shell Execution** — Run commands on the device
-- 📋 **UI Tree Inspection** — Get accessibility tree as JSON for element discovery
-- 📤 **Log Export** — Full debug log export (UI log + logcat + device info)
+- 📋 **UI Tree Inspection** — Accessibility tree as JSON for element discovery
+- 📤 **Log Export** — Business log (metrics) + Debug log (logcat)
 
 ## Architecture
 
@@ -49,18 +54,13 @@ An Android app that connects to an [OpenClaw](https://github.com/openclaw/opencl
 └──────────────┘                         └───────────────┘
 ```
 
-**Protocol Flow:**
-1. Gateway sends `event: node.invoke.request` with `{id, command, paramsJSON}`
-2. App executes the command via Accessibility Service
-3. App sends `req: node.invoke.result` with `{id, nodeId, ok, payloadJSON}`
-
 ## Quick Start
 
 ### Prerequisites
 
 - Android 8.0+ (API 26+)
-- An [OpenClaw](https://github.com/openclaw/openclaw) Gateway running on your network
-- Network connectivity between phone and Gateway (LAN, Tailscale, etc.)
+- An [OpenClaw](https://github.com/openclaw/openclaw) Gateway running
+- Network connectivity between phone and Gateway
 
 ### Install
 
@@ -69,35 +69,35 @@ Download the latest APK from [Releases](https://github.com/WqyJh/openclaw-phoneu
 ### Setup
 
 1. **Install & open** the app
-2. **Enable Accessibility Service**: Tap the button → enable "OpenClaw PhoneUse Agent" in system settings
-3. **Allow Notification Permission**: Automatically prompted on first launch
-4. **Enter Gateway URL**: 
-   - LAN: `192.168.1.100:18789`
-   - Tailscale Serve: `https://mydevice.ts.net`
-5. **Enter Gateway Token** (if configured)
-6. **Tap Connect**
-7. **Approve device** on Gateway (Dashboard → Nodes, or `openclaw device approve`)
+2. **Grant permissions** (prompted automatically):
+   - Accessibility Service → enable "OpenClaw PhoneUse Agent"
+   - Notification permission
+   - Battery optimization exemption
+   - All files access (for file operations)
+   - Screen Capture (optional, for video recording)
+3. **Enter Gateway URL** (see [Connection Methods](#connection-methods))
+4. **Enter Gateway Token** (if configured)
+5. **Tap Connect**
+6. **Approve device** on Gateway (Dashboard → Nodes, or `openclaw device approve`)
+
+After first setup, the app auto-connects on launch.
 
 ## Commands
 
 ### Standard OpenClaw Node Commands
 
-These are recognized by the Gateway's built-in `nodes` tool:
-
 | Command | Parameters | Min API | Description |
 |---------|-----------|---------|-------------|
 | `camera.snap` | `{maxWidth?, quality?}` | **30 (11)** | Screenshot (JPEG, compressed) |
 | `camera.list` | `{}` | 26 (8.0) | List available capture sources |
-| `camera.clip` | `{durationMs?, fps?, maxWidth?}` | **30 (11)** | Short video clip (MJPEG frames) |
-| `screen.record` | `{durationMs?, fps?, maxWidth?}` | **30 (11)** | Screen recording (MJPEG frames) |
+| `camera.clip` | `{durationMs?, fps?, maxWidth?}` | **30 (11)** | Short video clip (MP4, fallback to screenshot) |
+| `screen.record` | `{durationMs?, fps?, bitrate?, maxWidth?}` | **30 (11)** | H.264 MP4 screen recording |
 | `location.get` | `{}` | 26 (8.0) | GPS/network location |
 | `notifications.list` | `{}` | 26 (8.0) | List active notifications |
 | `system.run` | `{command}` | 26 (8.0) | Execute shell command |
 | `system.notify` | `{title, body}` | 26 (8.0) | Show Android notification |
 
 ### PhoneUse Commands
-
-These provide full UI automation via Accessibility Service:
 
 | Command | Parameters | Min API | Description |
 |---------|-----------|---------|-------------|
@@ -127,11 +127,59 @@ These provide full UI automation via Accessibility Service:
 | `phoneUse.wakeScreen` | `{}` | 26 (8.0) | Wake screen temporarily (10s) |
 | `phoneUse.isScreenOn` | `{}` | 26 (8.0) | Check if screen is on |
 
+### File Operations
+
+General-purpose file access. Supports any path accessible to the app (with `MANAGE_EXTERNAL_STORAGE` permission, this includes all of `/sdcard/`).
+
+| Command | Parameters | Description |
+|---------|-----------|-------------|
+| `file.read` | `{path, offset?, size?}` | Read file in chunks (default 2MB) |
+| `file.write` | `{path, base64, append?}` | Write or append to file |
+| `file.info` | `{path}` | File metadata (size, permissions, modified) |
+| `file.list` | `{path?}` | Directory listing (default `/sdcard`) |
+| `file.delete` | `{path}` | Delete file |
+
+**Chunked transfer example** (for large files):
+```
+1. file.info {path: "/sdcard/DCIM/video.mp4"}
+   → {size: 50000000, ...}
+
+2. file.read {path: "/sdcard/DCIM/video.mp4", offset: 0, size: 2097152}
+   → {base64: "...", offset: 0, size: 2097152, total: 50000000, done: false}
+
+3. file.read {path: "...", offset: 2097152, size: 2097152}
+   → {base64: "...", done: false}
+
+   ... repeat until done: true
+```
+
+### Screen Recording
+
+Real H.264 MP4 recording via MediaProjection + MediaRecorder.
+
+**Requires:** Screen Capture permission (tap "Enable Screen Capture" in app).
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `durationMs` | 5000 | Recording duration in ms |
+| `fps` | 15 | Frames per second |
+| `bitrate` | 2000000 | H.264 bitrate (bps) |
+| `maxWidth` | 720 | Max width (height scales) |
+| `inlineThreshold` | 10485760 | Max bytes for inline base64 (10MB) |
+
+**Small recordings** (≤10MB) are returned inline as base64.
+**Large recordings** return a `recordingId` — use `file.read` to download in chunks.
+
+```
+screen.record {durationMs: 10000, fps: 15, bitrate: 2000000}
+→ {format: "mp4", base64: "...", durationMs: 10000, sizeBytes: 2500000}
+```
+
 ## Connection Methods
 
 ### 1. LAN Direct Connect
 
-The simplest method — phone and Gateway on the same local network.
+Phone and Gateway on the same local network.
 
 ```
 Phone → ws://192.168.1.100:18789 → Gateway
@@ -142,21 +190,17 @@ Phone → ws://192.168.1.100:18789 → Gateway
 { gateway: { bind: "lan" } }
 ```
 
-**URL to enter:** `192.168.1.100:18789` (auto-prefixes `ws://`)
+**URL:** `192.168.1.100:18789`
 
-**Pros:** Lowest latency, no extra setup  
+**Pros:** Lowest latency, no extra setup
 **Cons:** Same network only, no encryption
 
 ### 2. Tailscale (Recommended for Remote Access)
 
-Secure encrypted tunnel via Tailscale. Two sub-options:
-
 #### 2a. Tailscale Serve (HTTPS reverse proxy)
 
-Gateway stays on `127.0.0.1`, Tailscale provides HTTPS endpoint.
-
 ```
-Phone → wss://mydevice.ts.net → Tailscale Serve → 127.0.0.1:18789 → Gateway
+Phone → wss://mydevice.ts.net → Tailscale Serve → 127.0.0.1:18789
 ```
 
 **Gateway config:**
@@ -169,17 +213,15 @@ Phone → wss://mydevice.ts.net → Tailscale Serve → 127.0.0.1:18789 → Gate
 }
 ```
 
-**URL to enter:** `https://mydevice.ts.net`
+**URL:** `https://mydevice.ts.net`
 
-**Pros:** HTTPS/WSS encryption, Tailscale identity auth, works across networks  
-**Cons:** Occasional TLS instability (`TLSV1_ALERT_INTERNAL_ERROR`)
+**Pros:** HTTPS encryption, Tailscale identity auth, cross-network
+**Cons:** Occasional TLS instability
 
 #### 2b. Tailscale Direct Bind
 
-Gateway listens on Tailscale IP directly (no HTTPS, plain WebSocket over WireGuard).
-
 ```
-Phone → ws://100.x.x.x:18789 → Gateway (on Tailscale IP)
+Phone → ws://100.x.x.x:18789 → Gateway (Tailscale IP)
 ```
 
 **Gateway config:**
@@ -192,17 +234,17 @@ Phone → ws://100.x.x.x:18789 → Gateway (on Tailscale IP)
 }
 ```
 
-**URL to enter:** `100.x.x.x:18789` (your Tailscale IP)
+**URL:** `100.x.x.x:18789`
 
-**Pros:** More stable than Serve, still encrypted (WireGuard), cross-network  
-**Cons:** `localhost` won't work on Gateway host, token auth required
+**Pros:** More stable than Serve, WireGuard encrypted, cross-network
+**Cons:** localhost unavailable on Gateway host
 
 ### 3. Caddy Reverse Proxy (Public Internet)
 
-Expose **only the WebSocket endpoint** via Caddy, hiding all other Gateway APIs.
+Expose **only the WebSocket endpoint**, hiding Control UI and HTTP APIs.
 
 ```
-Phone → wss://example.com → Caddy → 127.0.0.1:18789 → Gateway
+Phone → wss://example.com → Caddy → 127.0.0.1:18789
 ```
 
 **Gateway config:**
@@ -239,14 +281,14 @@ example.com {
 }
 ```
 
-**URL to enter:** `https://example.com`
+**URL:** `https://example.com`
 
-**Pros:** Works from anywhere, HTTPS, only WebSocket exposed  
-**Cons:** Requires domain + Caddy setup, public attack surface
+**Pros:** Works from anywhere, HTTPS, only WebSocket exposed
+**Cons:** Requires domain + Caddy setup
 
-> ⚠️ **Security:** Always use a strong Gateway token when exposing over public internet. The Caddy config above hides the Control UI and HTTP APIs, but WebSocket commands are still accessible with a valid token.
+> ⚠️ **Security:** Always use a strong Gateway token when exposing over public internet.
 
-### Connection Method Comparison
+### Comparison
 
 | Method | Encryption | Cross-Network | Latency | Setup |
 |--------|-----------|---------------|---------|-------|
@@ -259,13 +301,14 @@ example.com {
 
 ### 1. Allow PhoneUse Commands
 
-Add to your `~/.openclaw/openclaw.json`:
+Add to `~/.openclaw/openclaw.json`:
 
 ```json5
 {
   gateway: {
     nodes: {
       allowCommands: [
+        // UI automation
         "phoneUse.tap", "phoneUse.doubleTap", "phoneUse.longTap",
         "phoneUse.swipe", "phoneUse.pinch",
         "phoneUse.setText", "phoneUse.typeText", "phoneUse.findAndClick",
@@ -276,30 +319,22 @@ Add to your `~/.openclaw/openclaw.json`:
         "phoneUse.scrollLeft", "phoneUse.scrollRight",
         "phoneUse.waitForElement", "phoneUse.inputKey",
         "phoneUse.requestScreenCapture",
+        // Screen lock
+        "phoneUse.unlock", "phoneUse.lockScreen",
+        "phoneUse.wakeScreen", "phoneUse.isScreenOn",
+        // Media capture
         "camera.snap", "camera.clip", "screen.record",
-        "system.run", "system.notify"
+        // System
+        "system.run", "system.notify",
+        // File operations
+        "file.read", "file.write", "file.info", "file.list", "file.delete"
       ]
     }
   }
 }
 ```
 
-### 2. Tailscale Serve (Recommended for Remote Access)
-
-```json5
-{
-  gateway: {
-    bind: "loopback",
-    tailscale: { mode: "serve" }
-  }
-}
-```
-
-This keeps the Gateway on `127.0.0.1` while Tailscale provides HTTPS access at `https://<device>.ts.net`.
-
-### 3. Device Pairing
-
-On first connect, the device needs approval:
+### 2. Device Pairing
 
 ```bash
 # Via CLI
@@ -307,6 +342,26 @@ openclaw device approve
 
 # Or via Gateway Dashboard → Nodes page
 ```
+
+## Background & Keep-Alive
+
+The app is designed to work with the screen off:
+
+| Component | Screen Off | Locked |
+|-----------|-----------|--------|
+| WebSocket | ✅ CPU + WiFi wake locks | ✅ |
+| Accessibility | ✅ System service | ✅ |
+| Gestures (tap/swipe) | ✅ but blind | ✅ auto-wakes screen |
+| Screenshots | ✅ auto-wakes screen | ✅ |
+| File operations | ✅ | ✅ |
+
+**How it works:**
+- Phone sleeps normally (no screen burn-in)
+- CPU + WiFi wake locks keep connection alive
+- When a command arrives → screen wakes for 10s → execute → sleep
+- Battery optimization exemption prevents Doze from killing the service
+
+**MIUI/HyperOS users:** Also enable "Autostart" and "No restrictions" in battery settings.
 
 ## Building
 
@@ -316,67 +371,36 @@ openclaw device approve
 - Android SDK (API 34)
 - Gradle 8.7+
 
-### Build Debug APK
+### Build
 
 ```bash
-# Clone
 git clone https://github.com/WqyJh/openclaw-phoneuse.git
 cd openclaw-phoneuse
-
-# Build
 ./gradlew assembleDebug
-
-# APK at: app/build/outputs/apk/debug/app-debug.apk
-```
-
-### Build Release APK
-
-```bash
-./gradlew assembleRelease
-```
-
-> Note: Release builds require a signing keystore. See [Android signing docs](https://developer.android.com/studio/publish/app-signing).
-
-## Automation Example
-
-Using the OpenClaw `nodes` tool from an AI agent:
-
-```javascript
-// Take a screenshot
-nodes invoke --node <deviceId> --command phoneUse.screenshot
-
-// Tap a button
-nodes invoke --node <deviceId> --command phoneUse.tap --params '{"x": 540, "y": 1200}'
-
-// Type text
-nodes invoke --node <deviceId> --command phoneUse.setText --params '{"text": "Hello world"}'
-
-// Get UI tree for element discovery
-nodes invoke --node <deviceId> --command phoneUse.getUITree --params '{"interactiveOnly": true}'
-
-// Launch an app
-nodes invoke --node <deviceId> --command phoneUse.launch --params '{"app": "Settings"}'
+# APK: app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `device identity mismatch` | Wrong key algorithm | Use V18+ (Ed25519) |
-| `device signature invalid` | Token/payload mismatch | Reset Pairing in app |
-| `command not allowlisted` | Gateway blocks command | Add to `gateway.nodes.allowCommands` |
-| `command not declared by node` | Stale node data | Disconnect & reconnect |
-| `handshake timeout` | TLS/network issue | Check Tailscale Serve status |
-| Screenshot returns error | Accessibility not enabled | Enable in system settings |
-| Frequent disconnects | Tailscale Serve instability | Try `bind: "tailnet"` mode |
+| Symptom | Fix |
+|---------|-----|
+| `device identity mismatch` | Reset Pairing in app |
+| `device signature invalid` | Reset Pairing, check clock sync |
+| `command not allowlisted` | Add to `gateway.nodes.allowCommands` |
+| `command not declared by node` | Disconnect & reconnect |
+| Screenshot returns error | Enable Accessibility Service |
+| Frequent disconnects | Try Tailscale Direct Bind, check battery optimization |
+| `MediaProjection` error | Tap "Enable Screen Capture" in app (for recording only) |
+| Storage permission denied | Grant "All files access" in system settings |
+| Unlock fails | Use swipe lock or provide correct PIN |
 
 ## Security
 
-- **Ed25519 device identity**: Each device generates a unique keypair. Device ID = SHA-256 of public key.
-- **Challenge-response auth**: Gateway sends nonce → device signs with Ed25519 → Gateway verifies.
-- **Scoped tokens**: Gateway issues device-scoped tokens after pairing approval.
-- **Command allowlist**: Gateway enforces per-platform command allowlists.
-- **Tailscale encryption**: All traffic encrypted via WireGuard when using Tailscale.
+- **Ed25519 device identity** — unique keypair per device, SHA-256 fingerprint as ID
+- **Challenge-response auth** — Gateway nonce signed with Ed25519
+- **Command allowlist** — Gateway enforces per-platform allowlists
+- **Scoped device tokens** — issued after pairing approval
+- **Tailscale / Caddy encryption** — WireGuard or HTTPS for transport
 
 ## License
 

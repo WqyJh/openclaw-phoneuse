@@ -39,9 +39,15 @@ The sub-agent MUST exit after completing its task — do not keep it running.
 - Use lower quality when possible: `{maxWidth: 480, quality: 30}` → ~20KB
 - **Never reference raw base64** in your responses — describe what you see in words
 
-### Rule 3: Keep files on device, not in context
+### Rule 3: Use `nodes` tool actions for media (not invoke)
 
-Screen recordings and large files should stay on the phone — don't load them into context. Use `file.read` only when you need to transfer to the server. The files remain on the device for later access.
+For screenshots and recordings, use `nodes` tool **actions** (camera_snap, screen_record) instead of invoke. The Gateway automatically saves media to server-side files, so only a file path enters your context — not the raw image/video data.
+
+| Method | Context cost | Use when |
+|--------|-------------|----------|
+| `nodes camera_snap` (action) | ✅ File path only | Default for screenshots |
+| `nodes screen_record` (action) | ✅ File path only | Default for recordings |
+| `nodes invoke phoneUse.screenshot` | ⚠️ base64 in payload | Custom params needed |
 
 ## Before You Start
 
@@ -73,13 +79,18 @@ All commands use the `nodes` tool:
 
 ### See the screen
 
+Use the `nodes` tool's **`camera_snap` action** (not invoke):
+
 ```json
-{"invokeCommand": "phoneUse.screenshot", "invokeParamsJson": "{}"}
+{"action": "camera_snap", "node": "<nodeId>"}
 ```
 
-Returns a **file path** on the phone (not base64). The image is NOT loaded into context.
-To view the image, use `file.read` with the returned path.
-Response: `{path: "/data/.../screenshot_xxx.jpg", width: 720, height: 1600, sizeBytes: 98000}`
+Gateway automatically saves the image to a **server-side file** and returns a local path. The raw image data does NOT enter your context — you get a `MEDIA:` path reference.
+
+**For custom resolution/quality**, use invoke:
+```json
+{"action": "invoke", "node": "<nodeId>", "invokeCommand": "phoneUse.screenshot", "invokeParamsJson": "{\"maxWidth\": 480, \"quality\": 30}"}
+```
 
 ### Get interactive elements
 

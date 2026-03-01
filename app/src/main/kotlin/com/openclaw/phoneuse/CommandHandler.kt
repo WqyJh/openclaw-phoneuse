@@ -89,12 +89,17 @@ class CommandHandler {
                     return captureForGateway(svc, maxWidth, 60)
                 }
 
-                JSONObject()
-                    .put("ok", true)
-                    .put("path", result.filePath)
+                val clipResponse = JSONObject()
                     .put("format", result.format)
                     .put("durationMs", result.durationMs)
                     .put("sizeBytes", result.sizeBytes)
+                if (result.sizeBytes <= 10 * 1024 * 1024) {
+                    try {
+                        val bytes = java.io.File(result.filePath).readBytes()
+                        clipResponse.put("base64", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
+                    } catch (_: Exception) {}
+                }
+                clipResponse
             }
 
             "screen.record" -> {
@@ -121,16 +126,24 @@ class CommandHandler {
                     return errorResult("Screen recording failed. Check logcat for details.")
                 }
 
-                // Return path only — no base64 in context
-                JSONObject()
-                    .put("ok", true)
-                    .put("path", result.filePath)
+                val response = JSONObject()
                     .put("format", result.format)
                     .put("durationMs", result.durationMs)
                     .put("width", result.width)
                     .put("height", result.height)
                     .put("sizeBytes", result.sizeBytes)
-                    .put("message", "Recording saved: ${result.durationMs}ms ${result.sizeBytes / 1024}KB")
+                    .put("path", result.filePath)
+
+                // Include base64 for Gateway to write to server file
+                if (result.sizeBytes <= inlineThreshold) {
+                    try {
+                        val bytes = java.io.File(result.filePath).readBytes()
+                        response.put("base64", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to read recording: ${e.message}")
+                    }
+                }
+                response
             }
 
             "location.get" -> {
@@ -301,8 +314,8 @@ class CommandHandler {
             "phoneUse.screenshot" -> {
                 val quality = params.optInt("quality", 60)
                 val maxWidth = params.optInt("maxWidth", 720)
-                // Save to file, return path only (no base64 in context)
-                captureToFile(svc, maxWidth, quality)
+                // Returns base64 — Gateway writes to server file via nodes tool
+                captureForGateway(svc, maxWidth, quality)
             }
 
             "phoneUse.requestScreenCapture" -> {

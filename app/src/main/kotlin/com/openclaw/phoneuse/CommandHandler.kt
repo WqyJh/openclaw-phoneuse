@@ -33,30 +33,38 @@ class CommandHandler {
             // ========== Standard OpenClaw node commands ==========
             
             "camera.snap" -> {
-                // Standard screenshot - compressed for transmission
+                // Standard screenshot matching Gateway's expected format:
+                // {format, base64, width, height}
                 val maxWidth = params.optInt("maxWidth", 720)
                 val quality = params.optInt("quality", 60)
-                captureAccessibility(svc, maxWidth, quality)
+                captureForGateway(svc, maxWidth, quality)
             }
 
             "camera.list" -> {
-                // Android phones: front + back cameras
                 JSONObject()
                     .put("ok", true)
                     .put("cameras", org.json.JSONArray()
-                        .put(JSONObject().put("id", "screen").put("name", "Screen Capture").put("facing", "front"))
+                        .put(JSONObject().put("id", "screen").put("name", "Screen").put("facing", "front"))
                     )
-                    .put("message", "Screen capture available (use camera.snap)")
             }
 
             "camera.clip" -> {
-                // Short video clip - return screenshot for now
-                captureAccessibility(svc, 720, 60)
+                // Short clip = multi-frame capture as base64 MJPEG
+                val durationMs = params.optLong("durationMs", 2000)
+                val fps = params.optInt("fps", 5)
+                val maxWidth = params.optInt("maxWidth", 480)
+                val quality = params.optInt("quality", 50)
+                captureScreenRecord(svc, durationMs, fps, maxWidth, quality)
             }
 
             "screen.record" -> {
-                // Return compressed screenshot (full video recording TODO)
-                captureAccessibility(svc, 720, 60)
+                // Screen recording: capture multiple frames, encode as base64
+                // Gateway expects: {format, base64, durationMs?, fps?}
+                val durationMs = params.optLong("durationMs", 3000)
+                val fps = params.optInt("fps", 5)
+                val maxWidth = params.optInt("maxWidth", 480)
+                val quality = params.optInt("quality", 50)
+                captureScreenRecord(svc, durationMs, fps, maxWidth, quality)
             }
 
             "location.get" -> {
@@ -227,9 +235,7 @@ class CommandHandler {
             "phoneUse.screenshot" -> {
                 val quality = params.optInt("quality", 60)
                 val maxWidth = params.optInt("maxWidth", 720)
-                // Always use Accessibility API - it's the most reliable path
-                // MediaProjection has too many issues (permission loss, process restart, ROM quirks)
-                captureAccessibility(svc, maxWidth, quality)
+                captureForGateway(svc, maxWidth, quality)
             }
 
             "phoneUse.requestScreenCapture" -> {
@@ -362,6 +368,95 @@ class CommandHandler {
                 capture.release()
             }
         }
+    }
+
+    /**
+     * Capture screenshot in Gateway's expected format: {format, base64, width, height}
+     */
+    private suspend fun captureForGateway(svc: PhoneUseService, maxWidth: Int = 720, quality: Int = 60): JSONObject {
+        return suspendCancellableCoroutine { cont ->
+            svc.takeScreenshotBase64(maxWidth, quality) { data ->
+                if (data != null) {
+                    // Gateway parseCameraSnapPayload expects: format, base64, width, height
+                    cont.resume(JSONObject()
+                        .put("format", "jpg")
+                        .put("base64", data.base64)
+                        .put("width", data.width)
+                        .put("height", data.height))
+                } else {
+                    cont.resume(errorResult("Screenshot failed. Ensure Accessibility Service is enabled."))
+                }
+            }
+        }
+    }
+
+    /**
+     * Screen recording: capture multiple frames via Accessibility API.
+     * Returns base64-encoded MJPEG (concatenated JPEG frames).
+     * Gateway parseScreenRecordPayload expects: {format, base64, durationMs?, fps?}
+     */
+    private suspend fun captureScreenRecord(
+        svc: PhoneUseService, durationMs: Long, fps: Int, maxWidth: Int, quality: Int
+    ): JSONObject {
+        val frameInterval = (1000L / fps.coerceIn(1, 30))
+        val frameCount = ((durationMs / frameInterval).toInt()).coerceIn(1, 150) // Max 150 frames
+        val startTime = System.currentTimeMillis()
+
+        // Capture frames sequentially
+        val frames = mutableListOf<ByteArray>()
+        for (i in 0 until frameCount) {
+            val frameData = suspendCancellableCoroutine<PhoneUseService.ScreenshotData?> { cont ->
+                svc.takeScreenshotBase64(maxWidth, quality) { data -> cont.resume(data) }
+            }
+            if (frameData != null) {
+                frames.add(android.util.Base64.decode(frameData.base64, android.util.Base64.NO_WRAP))
+            }
+            // Wait for next frame timing
+            val elapsed = System.currentTimeMillis() - startTime
+            val nextFrameTime = (i + 1) * frameInterval
+            val sleepMs = nextFrameTime - elapsed
+            if (sleepMs > 0 && i < frameCount - 1) {
+                kotlinx.coroutines.delay(sleepMs)
+            }
+        }
+
+        if (frames.isEmpty()) {
+            return errorResult("Screen recording failed: no frames captured")
+        }
+
+        val actualDuration = System.currentTimeMillis() - startTime
+
+        // For single frame, return as JPEG
+        if (frames.size == 1) {
+            val base64 = android.util.Base64.encodeToString(frames[0], android.util.Base64.NO_WRAP)
+            return JSONObject()
+                .put("format", "jpg")
+                .put("base64", base64)
+                .put("durationMs", actualDuration)
+                .put("fps", 1)
+                .put("frameCount", 1)
+        }
+
+        // Multiple frames: concatenate as MJPEG (JPEG sequence with boundary markers)
+        // Each frame is a complete JPEG, separated by boundary
+        val boundary = "--frame--"
+        val output = java.io.ByteArrayOutputStream()
+        for ((idx, frame) in frames.withIndex()) {
+            if (idx > 0) output.write(boundary.toByteArray())
+            output.write(frame)
+        }
+        val base64 = android.util.Base64.encodeToString(output.toByteArray(), android.util.Base64.NO_WRAP)
+        val totalSizeKB = output.size() / 1024
+
+        Log.i(TAG, "Screen record: ${frames.size} frames, ${actualDuration}ms, ${totalSizeKB}KB")
+
+        return JSONObject()
+            .put("format", "mjpeg")
+            .put("base64", base64)
+            .put("durationMs", actualDuration)
+            .put("fps", frames.size * 1000 / actualDuration.coerceAtLeast(1))
+            .put("frameCount", frames.size)
+            .put("sizeBytes", output.size())
     }
 
     private suspend fun captureAccessibility(svc: PhoneUseService, maxWidth: Int = 720, quality: Int = 60): JSONObject {

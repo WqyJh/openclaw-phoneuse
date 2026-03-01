@@ -109,7 +109,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Version display
-        binding.versionText.text = "v18 • ${Build.MODEL}"
+        binding.versionText.text = "v19 • ${Build.MODEL}"
 
         // Device ID display
         try {
@@ -160,7 +160,7 @@ class MainActivity : AppCompatActivity() {
                 sb.appendLine("Time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}")
                 sb.appendLine("Device: ${Build.MODEL} (${Build.MANUFACTURER})")
                 sb.appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-                sb.appendLine("App Version: 2.0.0-v18")
+                sb.appendLine("App Version: 2.0.0-v19")
                 sb.appendLine()
 
                 // UI Command Log
@@ -212,6 +212,30 @@ class MainActivity : AppCompatActivity() {
 
         // Request notification permission (Android 13+)
         requestNotificationPermission()
+
+        // Auto-connect if we have a saved URL and accessibility is enabled
+        autoConnectIfReady()
+    }
+
+    private fun autoConnectIfReady() {
+        // Don't auto-connect if already connected
+        if (GatewayForegroundService.gatewayClient != null) return
+        
+        val savedUrl = prefs.getString("url", "") ?: ""
+        if (savedUrl.isEmpty()) return  // No saved URL, user hasn't connected before
+        
+        if (!isAccessibilityServiceEnabled()) {
+            appendLog("Auto-connect skipped: Accessibility not enabled")
+            return
+        }
+        
+        val token = prefs.getString("token", "") ?: ""
+        val params = ConnectionParams.fromUrl(savedUrl, token) ?: return
+        
+        appendLog("Auto-connecting to ${params.displayUrl}…")
+        GatewayForegroundService.start(this, params)
+        binding.connectButton.isEnabled = false
+        binding.disconnectButton.isEnabled = true
     }
 
     private fun requestNotificationPermission() {

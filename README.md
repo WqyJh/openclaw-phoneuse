@@ -126,6 +126,14 @@ After first setup, the app auto-connects on launch.
 | `phoneUse.lockScreen` | `{}` | **28 (9.0)** | Lock the screen |
 | `phoneUse.wakeScreen` | `{}` | 26 (8.0) | Wake screen temporarily (10s) |
 | `phoneUse.isScreenOn` | `{}` | 26 (8.0) | Check if screen is on |
+| `phoneUse.listApps` | `{includeSystem?}` | 26 (8.0) | List installed apps with package names |
+| `phoneUse.getForegroundApp` | `{}` | 26 (8.0) | Get current foreground package |
+| `phoneUse.openUrl` | `{url}` | 26 (8.0) | Open URL in browser or app |
+| `phoneUse.startActivity` | `{action?, uri?, package?, class?}` | 26 (8.0) | Launch any Android Intent |
+| `phoneUse.clipboard` | `{set?}` | 26 (8.0) | Read or write clipboard |
+| `phoneUse.getDeviceStatus` | `{}` | 26 (8.0) | Battery, WiFi, storage, screen state |
+| `phoneUse.openAllApps` | `{}` | **31 (12)** | Open app drawer |
+| `phoneUse.queryIntents` | `{action?, package?}` | 26 (8.0) | Discover app activities & intent handlers |
 
 ### File Operations
 
@@ -322,6 +330,11 @@ Add to `~/.openclaw/openclaw.json`:
         // Screen lock
         "phoneUse.unlock", "phoneUse.lockScreen",
         "phoneUse.wakeScreen", "phoneUse.isScreenOn",
+        // Apps & system info
+        "phoneUse.listApps", "phoneUse.getForegroundApp",
+        "phoneUse.openUrl", "phoneUse.startActivity",
+        "phoneUse.clipboard", "phoneUse.getDeviceStatus",
+        "phoneUse.openAllApps", "phoneUse.queryIntents",
         // Media capture
         "camera.snap", "camera.clip", "screen.record",
         // System

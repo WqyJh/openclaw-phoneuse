@@ -234,11 +234,19 @@
                         android:textStyle="bold" />
                     
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/exportLogButton"
+                        android:id="@+id/exportBizLogButton"
                         android:layout_width="wrap_content"
                         android:layout_height="36dp"
-                        android:text="Export"
-                        android:textSize="12sp"
+                        android:text="Biz Log"
+                        android:textSize="11sp"
+                        style="@style/Widget.Material3.Button.TextButton" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/exportDebugLogButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="Debug Log"
+                        android:textSize="11sp"
                         style="@style/Widget.Material3.Button.TextButton" />
                 </LinearLayout>
 

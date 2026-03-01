@@ -35,7 +35,7 @@ class GatewayClient(
         fun onPaired(deviceToken: String?)
         fun onDisconnected(reason: String)
         fun onCommandReceived(command: String, id: String)
-        fun onCommandCompleted(command: String, success: Boolean)
+        fun onCommandCompleted(command: String, success: Boolean, execMs: Long = 0, payloadBytes: Int = 0, error: String? = null)
         fun onError(error: String)
     }
 
@@ -111,7 +111,7 @@ class GatewayClient(
 
         val request = Request.Builder()
             .url(params.wsUrl)
-            .header("User-Agent", "OpenClawPhoneUse/2.0.21")
+            .header("User-Agent", "OpenClawPhoneUse/2.0.22")
             .build()
 
         Log.i(TAG, "Connecting to ${params.wsUrl} (gen=$gen, backoff=${currentBackoffMs}ms)")
@@ -228,15 +228,22 @@ class GatewayClient(
                 } ?: JSONObject()
 
                 scope?.launch {
+                    val startMs = System.currentTimeMillis()
                     try {
                         val result = commandHandler.execute(command, cmdParams)
+                        val execMs = System.currentTimeMillis() - startMs
+                        val payloadJson = result.toString()
+                        val payloadBytes = payloadJson.length
                         sendInvokeResult(requestId, nodeId, true, result)
-                        listener.onCommandCompleted(command, true)
+                        val totalMs = System.currentTimeMillis() - startMs
+                        Log.i(TAG, "CMD OK: $command exec=${execMs}ms send=${totalMs - execMs}ms payload=${payloadBytes}B")
+                        listener.onCommandCompleted(command, true, execMs, payloadBytes)
                     } catch (e: Exception) {
-                        Log.e(TAG, "Command failed: ${e.message}", e)
+                        val execMs = System.currentTimeMillis() - startMs
+                        Log.e(TAG, "CMD FAIL: $command exec=${execMs}ms error=${e.message}", e)
                         sendInvokeResult(requestId, nodeId, false, null,
                             JSONObject().put("code", "EXECUTION_ERROR").put("message", e.message))
-                        listener.onCommandCompleted(command, false)
+                        listener.onCommandCompleted(command, false, execMs, 0, e.message)
                     }
                 }
             }
@@ -305,7 +312,7 @@ class GatewayClient(
                 .put("maxProtocol", PROTOCOL_VERSION)
                 .put("client", JSONObject()
                     .put("id", "openclaw-android")
-                    .put("version", "2.0.21")
+                    .put("version", "2.0.22")
                     .put("platform", "android")
                     .put("mode", "node")
                     .put("deviceFamily", deviceFamily))
@@ -319,7 +326,7 @@ class GatewayClient(
                     .put("screenCapture", PhoneUseService.instance != null))
                 .put("auth", JSONObject().put("token", authToken))
                 .put("locale", "zh-CN")
-                .put("userAgent", "openclaw-phoneuse/2.0.21 (${Build.MODEL})")
+                .put("userAgent", "openclaw-phoneuse/2.0.22 (${Build.MODEL})")
                 .put("device", JSONObject()
                     .put("id", id.deviceId)
                     .put("publicKey", id.publicKey)

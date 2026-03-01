@@ -127,6 +127,134 @@ These provide full UI automation via Accessibility Service:
 | `phoneUse.wakeScreen` | `{}` | 26 (8.0) | Wake screen temporarily (10s) |
 | `phoneUse.isScreenOn` | `{}` | 26 (8.0) | Check if screen is on |
 
+## Connection Methods
+
+### 1. LAN Direct Connect
+
+The simplest method — phone and Gateway on the same local network.
+
+```
+Phone → ws://192.168.1.100:18789 → Gateway
+```
+
+**Gateway config:**
+```json5
+{ gateway: { bind: "lan" } }
+```
+
+**URL to enter:** `192.168.1.100:18789` (auto-prefixes `ws://`)
+
+**Pros:** Lowest latency, no extra setup  
+**Cons:** Same network only, no encryption
+
+### 2. Tailscale (Recommended for Remote Access)
+
+Secure encrypted tunnel via Tailscale. Two sub-options:
+
+#### 2a. Tailscale Serve (HTTPS reverse proxy)
+
+Gateway stays on `127.0.0.1`, Tailscale provides HTTPS endpoint.
+
+```
+Phone → wss://mydevice.ts.net → Tailscale Serve → 127.0.0.1:18789 → Gateway
+```
+
+**Gateway config:**
+```json5
+{
+  gateway: {
+    bind: "loopback",
+    tailscale: { mode: "serve" }
+  }
+}
+```
+
+**URL to enter:** `https://mydevice.ts.net`
+
+**Pros:** HTTPS/WSS encryption, Tailscale identity auth, works across networks  
+**Cons:** Occasional TLS instability (`TLSV1_ALERT_INTERNAL_ERROR`)
+
+#### 2b. Tailscale Direct Bind
+
+Gateway listens on Tailscale IP directly (no HTTPS, plain WebSocket over WireGuard).
+
+```
+Phone → ws://100.x.x.x:18789 → Gateway (on Tailscale IP)
+```
+
+**Gateway config:**
+```json5
+{
+  gateway: {
+    bind: "tailnet",
+    auth: { mode: "token" }
+  }
+}
+```
+
+**URL to enter:** `100.x.x.x:18789` (your Tailscale IP)
+
+**Pros:** More stable than Serve, still encrypted (WireGuard), cross-network  
+**Cons:** `localhost` won't work on Gateway host, token auth required
+
+### 3. Caddy Reverse Proxy (Public Internet)
+
+Expose **only the WebSocket endpoint** via Caddy, hiding all other Gateway APIs.
+
+```
+Phone → wss://example.com → Caddy → 127.0.0.1:18789 → Gateway
+```
+
+**Gateway config:**
+```json5
+{
+  gateway: {
+    bind: "loopback",
+    auth: { mode: "token" }
+  }
+}
+```
+
+**Caddyfile:**
+```
+example.com {
+    # Only allow WebSocket upgrade traffic through.
+    @ws {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+
+    handle @ws {
+        reverse_proxy 127.0.0.1:18789 {
+            header_up Host {host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-For {remote_host}
+        }
+    }
+
+    # Hide everything else (Control UI, HTTP APIs, etc.)
+    handle {
+        respond 404
+    }
+}
+```
+
+**URL to enter:** `https://example.com`
+
+**Pros:** Works from anywhere, HTTPS, only WebSocket exposed  
+**Cons:** Requires domain + Caddy setup, public attack surface
+
+> ⚠️ **Security:** Always use a strong Gateway token when exposing over public internet. The Caddy config above hides the Control UI and HTTP APIs, but WebSocket commands are still accessible with a valid token.
+
+### Connection Method Comparison
+
+| Method | Encryption | Cross-Network | Latency | Setup |
+|--------|-----------|---------------|---------|-------|
+| LAN Direct | ❌ | ❌ | Lowest | Easy |
+| Tailscale Serve | ✅ HTTPS | ✅ | Low | Medium |
+| Tailscale Direct | ✅ WireGuard | ✅ | Lowest | Medium |
+| Caddy Proxy | ✅ HTTPS | ✅ | Medium | Complex |
+
 ## Gateway Setup
 
 ### 1. Allow PhoneUse Commands

@@ -129,10 +129,19 @@ class GatewayForegroundService : Service() {
                 updateNotification("Executing: $command")
                 broadcastCommand(command, "received")
             }
-            override fun onCommandCompleted(command: String, success: Boolean) {
+            override fun onCommandCompleted(command: String, success: Boolean, execMs: Long, payloadBytes: Int, error: String?) {
                 val status = if (success) "✓" else "✗"
                 updateNotification("Last: $command $status — ready")
-                broadcastCommand(command, if (success) "success" else "failed")
+                val details = buildString {
+                    append(if (success) "success" else "failed")
+                    append(" ${execMs}ms")
+                    if (payloadBytes > 0) {
+                        val kb = payloadBytes / 1024
+                        append(" ${if (kb > 0) "${kb}KB" else "${payloadBytes}B"}")
+                    }
+                    if (error != null) append(" err=$error")
+                }
+                broadcastCommand(command, details)
             }
             override fun onError(error: String) {
                 Log.e(TAG, "Gateway error: $error")

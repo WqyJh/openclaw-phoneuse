@@ -109,7 +109,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Version display
-        binding.versionText.text = "v21 • ${Build.MODEL}"
+        binding.versionText.text = "v22 • ${Build.MODEL}"
 
         // Device ID display
         try {
@@ -151,49 +151,50 @@ class MainActivity : AppCompatActivity() {
                 .show()
         }
 
-        // Export log button - includes UI log + logcat
-        binding.exportLogButton.setOnClickListener {
-            Toast.makeText(this, "Collecting logs...", Toast.LENGTH_SHORT).show()
+        // Biz Log export - command records with metrics
+        binding.exportBizLogButton.setOnClickListener {
+            val sb = StringBuilder()
+            sb.appendLine("===== OpenClaw PhoneUse Business Log =====")
+            sb.appendLine("Time: ${dateFormat.format(java.util.Date())}")
+            sb.appendLine("Device: ${Build.MODEL} (${Build.MANUFACTURER})")
+            sb.appendLine("Version: 2.0.0-v22")
+            sb.appendLine("Accessibility: ${PhoneUseService.instance != null}")
+            sb.appendLine("Gateway: ${GatewayForegroundService.gatewayClient != null}")
+            sb.appendLine()
+            logLines.forEach { sb.appendLine(it) }
+            shareText("OpenClaw Biz Log", sb.toString())
+        }
+
+        // Debug Log export - logcat with stacktraces
+        binding.exportDebugLogButton.setOnClickListener {
+            Toast.makeText(this, "Collecting debug logs...", Toast.LENGTH_SHORT).show()
             Thread {
                 val sb = StringBuilder()
-                sb.appendLine("===== OpenClaw PhoneUse Log =====")
+                sb.appendLine("===== OpenClaw PhoneUse Debug Log =====")
                 sb.appendLine("Time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}")
                 sb.appendLine("Device: ${Build.MODEL} (${Build.MANUFACTURER})")
                 sb.appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-                sb.appendLine("App Version: 2.0.0-v21")
+                sb.appendLine("Version: 2.0.0-v22")
                 sb.appendLine()
-
-                // UI Command Log
-                sb.appendLine("===== Command Log =====")
-                logLines.forEach { sb.appendLine(it) }
-                sb.appendLine()
-
-                // Connection state
-                sb.appendLine("===== Connection State =====")
+                sb.appendLine("=== State ===")
                 sb.appendLine("Accessibility: ${PhoneUseService.instance != null}")
                 sb.appendLine("ScreenCapture: ${ScreenCaptureManager.hasPermission()}")
                 sb.appendLine("Gateway: ${GatewayForegroundService.gatewayClient != null}")
+                sb.appendLine("KeepAlive: ${GatewayForegroundService.keepAlive != null}")
+                sb.appendLine("ScreenOn: ${GatewayForegroundService.keepAlive?.isScreenOn()}")
                 sb.appendLine()
-
-                // Logcat (last 500 lines, filtered to our app)
-                sb.appendLine("===== Logcat =====")
+                sb.appendLine("=== Command Log ===")
+                logLines.forEach { sb.appendLine(it) }
+                sb.appendLine()
+                sb.appendLine("=== Logcat (last 1000 lines) ===")
                 try {
-                    val process = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "500", "--pid=${android.os.Process.myPid()}"))
-                    val logcat = process.inputStream.bufferedReader().readText()
-                    sb.append(logcat)
+                    val p = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "1000", "--pid=${android.os.Process.myPid()}"))
+                    sb.append(p.inputStream.bufferedReader().readText())
                 } catch (e: Exception) {
-                    sb.appendLine("Failed to read logcat: ${e.message}")
+                    sb.appendLine("Logcat failed: ${e.message}")
                 }
-
-                val fullLog = sb.toString()
-                runOnUiThread {
-                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(android.content.Intent.EXTRA_SUBJECT, "OpenClaw PhoneUse Debug Log")
-                        putExtra(android.content.Intent.EXTRA_TEXT, fullLog)
-                    }
-                    startActivity(android.content.Intent.createChooser(intent, "Export Log"))
-                }
+                val text = sb.toString()
+                runOnUiThread { shareText("OpenClaw Debug Log", text) }
             }.start()
         }
 
@@ -357,6 +358,15 @@ class MainActivity : AppCompatActivity() {
             else -> status
         }
         appendLog("Status: $status")
+    }
+
+    private fun shareText(subject: String, text: String) {
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_SUBJECT, subject)
+            putExtra(android.content.Intent.EXTRA_TEXT, text)
+        }
+        startActivity(android.content.Intent.createChooser(intent, subject))
     }
 
     private fun appendLog(message: String) {
